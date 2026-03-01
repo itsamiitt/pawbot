@@ -1,0 +1,1067 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pawbot Docs — CLI, Configuration, Providers & Architecture</title>
+    <meta name="description"
+        content="Complete reference documentation for Pawbot: CLI commands, configuration schema, provider registry, built-in tools, skills, and system architecture.">
+    <link
+        href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box
+        }
+
+        :root {
+            --bg: #fafaf8;
+            --surface: #fff;
+            --border: #e8e5e0;
+            --text: #1a1815;
+            --dim: #8a8578;
+            --accent: #e87537;
+            --accent2: #d45d20;
+            --warm: #f5f0e8;
+            --warm2: #ede6d8;
+            --warm3: #c4a882;
+            --mono: 'DM Mono', monospace;
+            --font: 'DM Sans', system-ui, sans-serif;
+            --radius: 12px;
+            --shadow: 0 1px 3px rgba(0, 0, 0, .04), 0 4px 12px rgba(0, 0, 0, .03)
+        }
+
+        html {
+            scroll-behavior: smooth
+        }
+
+        body {
+            font-family: var(--font);
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.7;
+            -webkit-font-smoothing: antialiased
+        }
+
+        a {
+            color: var(--accent);
+            text-decoration: none
+        }
+
+        a:hover {
+            text-decoration: underline
+        }
+
+        nav {
+            position: fixed;
+            top: 0;
+            width: 100%;
+            z-index: 100;
+            background: rgba(250, 250, 248, .92);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border)
+        }
+
+        .nav-inner {
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: 14px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center
+        }
+
+        .nav-logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 700;
+            font-size: 17px;
+            color: var(--text);
+            text-decoration: none
+        }
+
+        .nav-logo .paw {
+            width: 30px;
+            height: 30px;
+            background: var(--accent);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            color: #fff
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 24px;
+            align-items: center
+        }
+
+        .nav-links a {
+            color: var(--dim);
+            font-size: 14px;
+            font-weight: 500;
+            text-decoration: none;
+            transition: color .2s
+        }
+
+        .nav-links a:hover {
+            color: var(--text);
+            text-decoration: none
+        }
+
+        .nav-links a.active {
+            color: var(--accent)
+        }
+
+        .btn-nav {
+            background: var(--accent) !important;
+            color: #fff !important;
+            padding: 7px 18px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600
+        }
+
+        .mobile-nav {
+            display: none;
+            background: none;
+            border: none;
+            font-size: 22px;
+            cursor: pointer;
+            color: var(--text)
+        }
+
+        .page-header {
+            padding: 100px 24px 48px;
+            max-width: 800px;
+            margin: 0 auto
+        }
+
+        .page-header h1 {
+            font-size: clamp(28px, 5vw, 40px);
+            font-weight: 700;
+            margin-bottom: 10px
+        }
+
+        .page-header p {
+            color: var(--dim);
+            font-size: 16px;
+            max-width: 560px
+        }
+
+        .content {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 0 24px 80px
+        }
+
+        .content h2 {
+            font-size: 22px;
+            font-weight: 700;
+            margin: 48px 0 12px;
+            padding-top: 24px;
+            border-top: 1px solid var(--border)
+        }
+
+        .content h2:first-of-type {
+            border-top: none;
+            margin-top: 0;
+            padding-top: 0
+        }
+
+        .content h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin: 24px 0 8px
+        }
+
+        .content p {
+            margin-bottom: 12px;
+            font-size: 15px
+        }
+
+        .content ul,
+        .content ol {
+            margin: 8px 0 16px 20px;
+            font-size: 15px
+        }
+
+        .content li {
+            margin-bottom: 6px
+        }
+
+        .code {
+            background: var(--warm);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px 20px;
+            font-family: var(--mono);
+            font-size: 13px;
+            color: var(--text);
+            overflow-x: auto;
+            position: relative;
+            line-height: 1.7;
+            margin: 12px 0 20px
+        }
+
+        .code .cmt {
+            color: var(--dim)
+        }
+
+        .code button {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--dim);
+            border-radius: 6px;
+            padding: 3px 10px;
+            font-size: 11px;
+            cursor: pointer;
+            font-family: var(--font);
+            transition: all .2s
+        }
+
+        .code button:hover {
+            color: var(--accent);
+            border-color: var(--accent)
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16px 0;
+            font-size: 14px
+        }
+
+        th {
+            text-align: left;
+            padding: 10px 12px;
+            font-size: 12px;
+            color: var(--dim);
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            border-bottom: 2px solid var(--border)
+        }
+
+        td {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border);
+            vertical-align: top
+        }
+
+        td:first-child {
+            font-family: var(--mono);
+            font-size: 13px;
+            white-space: nowrap;
+            color: var(--accent)
+        }
+
+        tr:hover {
+            background: rgba(232, 117, 55, .02)
+        }
+
+        .note {
+            background: var(--warm);
+            border-left: 3px solid var(--accent);
+            border-radius: 0 8px 8px 0;
+            padding: 14px 18px;
+            margin: 16px 0;
+            font-size: 14px
+        }
+
+        .note strong {
+            color: var(--accent)
+        }
+
+        .toc {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px 24px;
+            margin: 0 0 36px;
+            box-shadow: var(--shadow)
+        }
+
+        .toc h3 {
+            font-size: 14px;
+            font-weight: 600;
+            margin: 0 0 10px;
+            color: var(--dim);
+            text-transform: uppercase;
+            letter-spacing: 1px
+        }
+
+        .toc ol {
+            margin: 0;
+            padding-left: 20px;
+            font-size: 14px
+        }
+
+        .toc li {
+            margin-bottom: 4px
+        }
+
+        .toc a {
+            text-decoration: none;
+            color: var(--text)
+        }
+
+        .toc a:hover {
+            color: var(--accent)
+        }
+
+        .chip {
+            display: inline-block;
+            padding: 5px 12px;
+            background: var(--warm);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+            margin: 2px 4px 2px 0
+        }
+
+        footer {
+            padding: 36px 24px;
+            text-align: center;
+            border-top: 1px solid var(--border)
+        }
+
+        footer p {
+            font-size: 13px;
+            color: var(--dim)
+        }
+
+        footer a {
+            color: var(--dim);
+            text-decoration: none
+        }
+
+        footer a:hover {
+            color: var(--accent)
+        }
+
+        @media(max-width:768px) {
+            .nav-links {
+                display: none
+            }
+
+            .mobile-nav {
+                display: block
+            }
+        }
+
+        .nav-links.show {
+            display: flex !important;
+            position: fixed;
+            top: 56px;
+            left: 0;
+            right: 0;
+            background: rgba(250, 250, 248, .97);
+            backdrop-filter: blur(16px);
+            flex-direction: column;
+            padding: 16px 24px;
+            gap: 12px;
+            border-bottom: 1px solid var(--border)
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px)
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0)
+            }
+        }
+
+        .content {
+            animation: fadeIn .5s ease
+        }
+    </style>
+</head>
+
+<body>
+    <nav>
+        <div class="nav-inner">
+            <a href="index.html" class="nav-logo">
+                <div class="paw">🐾</div>Pawbot
+            </a>
+            <div class="nav-links">
+                <a href="index.html">Home</a>
+                <a href="install.html">Install</a>
+                <a href="docs.html" class="active">Docs</a>
+                <a href="https://github.com/HKUDS/pawbot" target="_blank" class="btn-nav">GitHub</a>
+            </div>
+            <button class="mobile-nav"
+                onclick="document.querySelector('.nav-links').classList.toggle('show')">☰</button>
+        </div>
+    </nav>
+
+    <div class="page-header">
+        <h1>Documentation</h1>
+        <p>Complete reference for Pawbot — CLI commands, configuration, providers, channels, tools, skills, and
+            architecture.</p>
+    </div>
+
+    <div class="content">
+        <div class="toc">
+            <h3>Contents</h3>
+            <ol>
+                <li><a href="#cli">CLI Commands</a></li>
+                <li><a href="#providers">Providers (16)</a></li>
+                <li><a href="#channels">Channels (10)</a></li>
+                <li><a href="#tools">Built-in Tools</a></li>
+                <li><a href="#skills">Skills (8)</a></li>
+                <li><a href="#config">Configuration Schema</a></li>
+                <li><a href="#architecture">Architecture</a></li>
+                <li><a href="#env">Environment Variables</a></li>
+            </ol>
+        </div>
+
+        <!-- CLI -->
+        <h2 id="cli">1. CLI Commands</h2>
+        <p>All commands available from the <code>pawbot</code> binary.</p>
+
+        <h3>Core</h3>
+        <table>
+            <tr>
+                <td>pawbot onboard</td>
+                <td>Create config + workspace. Use <code>--setup</code> for interactive API key wizard.</td>
+            </tr>
+            <tr>
+                <td>pawbot agent</td>
+                <td>Interactive chat session. Use <code>-m "..."</code> for single message.</td>
+            </tr>
+            <tr>
+                <td>pawbot gateway</td>
+                <td>Start the gateway server (enables all channels). Default port: <code>18790</code>.</td>
+            </tr>
+            <tr>
+                <td>pawbot status</td>
+                <td>Show config, workspace, model, and provider status.</td>
+            </tr>
+        </table>
+
+        <h3>Channels</h3>
+        <table>
+            <tr>
+                <td>pawbot channels status</td>
+                <td>Show connection status of all configured channels.</td>
+            </tr>
+            <tr>
+                <td>pawbot channels login</td>
+                <td>Link WhatsApp via QR code scanning.</td>
+            </tr>
+        </table>
+
+        <h3>Providers</h3>
+        <table>
+            <tr>
+                <td>pawbot provider login &lt;name&gt;</td>
+                <td>OAuth login for OAuth-based providers (e.g., <code>openai-codex</code>,
+                    <code>github-copilot</code>).</td>
+            </tr>
+        </table>
+
+        <h3>Cron (scheduling)</h3>
+        <table>
+            <tr>
+                <td>pawbot cron list</td>
+                <td>List scheduled jobs. Use <code>-a</code> to include disabled jobs.</td>
+            </tr>
+            <tr>
+                <td>pawbot cron add</td>
+                <td>Add a job. Requires <code>--name</code>, <code>--message</code>, and one of <code>--every</code>,
+                    <code>--cron</code>, <code>--at</code>.</td>
+            </tr>
+            <tr>
+                <td>pawbot cron remove &lt;id&gt;</td>
+                <td>Remove a job by ID.</td>
+            </tr>
+            <tr>
+                <td>pawbot cron enable &lt;id&gt;</td>
+                <td>Enable a job. Use <code>--disable</code> to disable.</td>
+            </tr>
+            <tr>
+                <td>pawbot cron run &lt;id&gt;</td>
+                <td>Manually run a job now. Use <code>-f</code> to force disabled jobs.</td>
+            </tr>
+        </table>
+
+        <!-- Providers -->
+        <h2 id="providers">2. Providers</h2>
+        <p>16 providers in the registry. Order defines match priority and fallback.</p>
+
+        <h3>Gateways</h3>
+        <p>Route any model through a single API key.</p>
+        <table>
+            <tr>
+                <th>Name</th>
+                <th>Config key</th>
+                <th>Default base URL</th>
+            </tr>
+            <tr>
+                <td>OpenRouter</td>
+                <td>openrouter</td>
+                <td>https://openrouter.ai/api/v1</td>
+            </tr>
+            <tr>
+                <td>AiHubMix</td>
+                <td>aihubmix</td>
+                <td>https://aihubmix.com/v1</td>
+            </tr>
+            <tr>
+                <td>SiliconFlow</td>
+                <td>siliconflow</td>
+                <td>https://api.siliconflow.cn/v1</td>
+            </tr>
+            <tr>
+                <td>VolcEngine</td>
+                <td>volcengine</td>
+                <td>https://ark.cn-beijing.volces.com/api/v3</td>
+            </tr>
+        </table>
+
+        <h3>Standard (API key)</h3>
+        <table>
+            <tr>
+                <th>Name</th>
+                <th>Config key</th>
+                <th>Keywords</th>
+            </tr>
+            <tr>
+                <td>Anthropic</td>
+                <td>anthropic</td>
+                <td>anthropic, claude</td>
+            </tr>
+            <tr>
+                <td>OpenAI</td>
+                <td>openai</td>
+                <td>openai, gpt</td>
+            </tr>
+            <tr>
+                <td>DeepSeek</td>
+                <td>deepseek</td>
+                <td>deepseek</td>
+            </tr>
+            <tr>
+                <td>Gemini</td>
+                <td>gemini</td>
+                <td>gemini</td>
+            </tr>
+            <tr>
+                <td>Zhipu AI</td>
+                <td>zhipu</td>
+                <td>zhipu, glm, zai</td>
+            </tr>
+            <tr>
+                <td>DashScope</td>
+                <td>dashscope</td>
+                <td>qwen, dashscope</td>
+            </tr>
+            <tr>
+                <td>Moonshot</td>
+                <td>moonshot</td>
+                <td>moonshot, kimi</td>
+            </tr>
+            <tr>
+                <td>MiniMax</td>
+                <td>minimax</td>
+                <td>minimax</td>
+            </tr>
+            <tr>
+                <td>Groq</td>
+                <td>groq</td>
+                <td>groq</td>
+            </tr>
+        </table>
+
+        <h3>OAuth</h3>
+        <table>
+            <tr>
+                <th>Name</th>
+                <th>Config key</th>
+                <th>Login command</th>
+            </tr>
+            <tr>
+                <td>OpenAI Codex</td>
+                <td>openai_codex</td>
+                <td><code>pawbot provider login openai-codex</code></td>
+            </tr>
+            <tr>
+                <td>GitHub Copilot</td>
+                <td>github_copilot</td>
+                <td><code>pawbot provider login github-copilot</code></td>
+            </tr>
+        </table>
+
+        <h3>Local / Self-hosted</h3>
+        <table>
+            <tr>
+                <th>Name</th>
+                <th>Config key</th>
+                <th>Notes</th>
+            </tr>
+            <tr>
+                <td>vLLM / Local</td>
+                <td>vllm</td>
+                <td>Any OpenAI-compatible local server. User must set <code>apiBase</code>.</td>
+            </tr>
+            <tr>
+                <td>Custom</td>
+                <td>custom</td>
+                <td>Direct OpenAI-compatible endpoint. Bypasses LiteLLM routing.</td>
+            </tr>
+        </table>
+
+        <div class="note"><strong>Provider matching:</strong> Pawbot auto-detects the provider from the model name. Set
+            <code>"provider": "auto"</code> (default) or force one explicitly in <code>agents.defaults.provider</code>.
+        </div>
+
+        <!-- Channels -->
+        <h2 id="channels">3. Channels</h2>
+        <p>10 channels, each with its own config block under <code>channels</code> in config.json.</p>
+        <table>
+            <tr>
+                <th>Channel</th>
+                <th>Config key</th>
+                <th>Auth method</th>
+            </tr>
+            <tr>
+                <td>Telegram</td>
+                <td>telegram</td>
+                <td>Bot token from @BotFather</td>
+            </tr>
+            <tr>
+                <td>Discord</td>
+                <td>discord</td>
+                <td>Bot token from Developer Portal</td>
+            </tr>
+            <tr>
+                <td>WhatsApp</td>
+                <td>whatsapp</td>
+                <td>QR code link via <code>pawbot channels login</code></td>
+            </tr>
+            <tr>
+                <td>Slack</td>
+                <td>slack</td>
+                <td>Bot token (<code>xoxb-</code>) + App token (<code>xapp-</code>)</td>
+            </tr>
+            <tr>
+                <td>Email</td>
+                <td>email</td>
+                <td>IMAP + SMTP credentials</td>
+            </tr>
+            <tr>
+                <td>Matrix</td>
+                <td>matrix</td>
+                <td>Access token + user ID</td>
+            </tr>
+            <tr>
+                <td>Feishu / Lark</td>
+                <td>feishu</td>
+                <td>App ID + App Secret</td>
+            </tr>
+            <tr>
+                <td>DingTalk</td>
+                <td>dingtalk</td>
+                <td>Client ID + Client Secret (Stream mode)</td>
+            </tr>
+            <tr>
+                <td>QQ</td>
+                <td>qq</td>
+                <td>App ID + Secret from q.qq.com</td>
+            </tr>
+            <tr>
+                <td>Mochat</td>
+                <td>mochat</td>
+                <td>Claw token + Agent user ID</td>
+            </tr>
+        </table>
+        <p>Each channel has an <code>allowFrom</code> list to restrict who can message your bot.</p>
+
+        <!-- Tools -->
+        <h2 id="tools">4. Built-in Tools</h2>
+        <p>Tools the agent can invoke during conversations.</p>
+        <table>
+            <tr>
+                <th>Tool</th>
+                <th>Source file</th>
+                <th>Description</th>
+            </tr>
+            <tr>
+                <td>filesystem</td>
+                <td>agent/tools/filesystem.py</td>
+                <td>Read, write, list, search files in workspace</td>
+            </tr>
+            <tr>
+                <td>shell</td>
+                <td>agent/tools/shell.py</td>
+                <td>Execute shell commands with timeout and path control</td>
+            </tr>
+            <tr>
+                <td>web</td>
+                <td>agent/tools/web.py</td>
+                <td>Brave web search, URL reading</td>
+            </tr>
+            <tr>
+                <td>mcp</td>
+                <td>agent/tools/mcp.py</td>
+                <td>MCP server tool proxy (stdio + HTTP)</td>
+            </tr>
+            <tr>
+                <td>cron</td>
+                <td>agent/tools/cron.py</td>
+                <td>Schedule, list, remove cron jobs</td>
+            </tr>
+            <tr>
+                <td>message</td>
+                <td>agent/tools/message.py</td>
+                <td>Send messages to channels</td>
+            </tr>
+            <tr>
+                <td>spawn</td>
+                <td>agent/tools/spawn.py</td>
+                <td>Spawn subagent with budget</td>
+            </tr>
+        </table>
+        <p>Tools config lives under <code>tools</code> in config.json. MCP servers are registered under
+            <code>tools.mcpServers</code>.</p>
+
+        <!-- Skills -->
+        <h2 id="skills">5. Skills</h2>
+        <p>8 built-in skills that extend the agent's capabilities.</p>
+        <table>
+            <tr>
+                <th>Skill</th>
+                <th>Description</th>
+            </tr>
+            <tr>
+                <td>clawhub</td>
+                <td>ClawHub integration</td>
+            </tr>
+            <tr>
+                <td>cron</td>
+                <td>Task scheduling skill</td>
+            </tr>
+            <tr>
+                <td>github</td>
+                <td>GitHub operations</td>
+            </tr>
+            <tr>
+                <td>memory</td>
+                <td>Memory management and search</td>
+            </tr>
+            <tr>
+                <td>skill-creator</td>
+                <td>Auto-creates new skills from novel workflows</td>
+            </tr>
+            <tr>
+                <td>summarize</td>
+                <td>Content summarization</td>
+            </tr>
+            <tr>
+                <td>tmux</td>
+                <td>Terminal multiplexer control</td>
+            </tr>
+            <tr>
+                <td>weather</td>
+                <td>Weather information retrieval</td>
+            </tr>
+        </table>
+        <p>Skills config: <code>skills.enabled</code>, <code>skills.autoCreateAfterNovelSystem2</code>,
+            <code>skills.skillsDir</code>.</p>
+
+        <!-- Config -->
+        <h2 id="config">6. Configuration Schema</h2>
+        <p>All config lives in <code>~/.pawbot/config.json</code>. Supports both camelCase and snake_case keys.</p>
+
+        <h3>Root sections</h3>
+        <table>
+            <tr>
+                <th>Key</th>
+                <th>Type</th>
+                <th>Description</th>
+            </tr>
+            <tr>
+                <td>agents</td>
+                <td>AgentsConfig</td>
+                <td>Default model, provider, tokens, temperature, iterations</td>
+            </tr>
+            <tr>
+                <td>providers</td>
+                <td>ProvidersConfig</td>
+                <td>API keys and base URLs for each provider</td>
+            </tr>
+            <tr>
+                <td>channels</td>
+                <td>ChannelsConfig</td>
+                <td>Enable/disable channels, tokens, allowFrom lists</td>
+            </tr>
+            <tr>
+                <td>gateway</td>
+                <td>GatewayConfig</td>
+                <td>Server host, port, heartbeat interval</td>
+            </tr>
+            <tr>
+                <td>tools</td>
+                <td>ToolsConfig</td>
+                <td>Web search, shell exec, workspace restriction, MCP servers</td>
+            </tr>
+            <tr>
+                <td>heartbeat</td>
+                <td>HeartbeatEngineConfig</td>
+                <td>Proactive trigger engine (check interval, triggers file)</td>
+            </tr>
+            <tr>
+                <td>cron</td>
+                <td>CronConfig</td>
+                <td>Scheduler enabled, registry path, check interval</td>
+            </tr>
+            <tr>
+                <td>skills</td>
+                <td>SkillsConfig</td>
+                <td>Skill system toggle, auto-create, skills directory</td>
+            </tr>
+            <tr>
+                <td>lora</td>
+                <td>LoRAConfig</td>
+                <td>Fine-tuning (enabled, auto-train, base model, dataset)</td>
+            </tr>
+            <tr>
+                <td>security</td>
+                <td>SecurityConfig</td>
+                <td>Sandboxing, injection detection, audit log, salience</td>
+            </tr>
+            <tr>
+                <td>observability</td>
+                <td>ObservabilityConfig</td>
+                <td>Tracing, OTLP, Prometheus port, privacy controls</td>
+            </tr>
+            <tr>
+                <td>subagents</td>
+                <td>SubagentsConfig</td>
+                <td>Max concurrent, token/time budgets, inbox review</td>
+            </tr>
+        </table>
+
+        <h3>Agent defaults</h3>
+        <table>
+            <tr>
+                <th>Key</th>
+                <th>Default</th>
+                <th>Description</th>
+            </tr>
+            <tr>
+                <td>model</td>
+                <td>anthropic/claude-opus-4-5</td>
+                <td>Default model to use</td>
+            </tr>
+            <tr>
+                <td>provider</td>
+                <td>auto</td>
+                <td>Auto-detect provider from model name</td>
+            </tr>
+            <tr>
+                <td>maxTokens</td>
+                <td>8192</td>
+                <td>Max output tokens</td>
+            </tr>
+            <tr>
+                <td>temperature</td>
+                <td>0.1</td>
+                <td>Sampling temperature</td>
+            </tr>
+            <tr>
+                <td>maxToolIterations</td>
+                <td>40</td>
+                <td>Max tool call rounds per conversation turn</td>
+            </tr>
+            <tr>
+                <td>memoryWindow</td>
+                <td>100</td>
+                <td>Number of recent messages to include in context</td>
+            </tr>
+            <tr>
+                <td>reasoningEffort</td>
+                <td>null</td>
+                <td>low / medium / high — enables LLM thinking mode</td>
+            </tr>
+        </table>
+
+        <h3>Security defaults</h3>
+        <table>
+            <tr>
+                <th>Key</th>
+                <th>Default</th>
+                <th>Description</th>
+            </tr>
+            <tr>
+                <td>enabled</td>
+                <td>true</td>
+                <td>Security layer enabled</td>
+            </tr>
+            <tr>
+                <td>requireConfirmationForDangerous</td>
+                <td>true</td>
+                <td>Prompt before dangerous commands</td>
+            </tr>
+            <tr>
+                <td>blockRootExecution</td>
+                <td>true</td>
+                <td>Prevent running as root</td>
+            </tr>
+            <tr>
+                <td>injectionDetection</td>
+                <td>true</td>
+                <td>Detect prompt injection attempts</td>
+            </tr>
+            <tr>
+                <td>minMemorySalience</td>
+                <td>0.2</td>
+                <td>Minimum salience to store a memory</td>
+            </tr>
+            <tr>
+                <td>maxMemoryTokens</td>
+                <td>300</td>
+                <td>Max tokens per memory entry</td>
+            </tr>
+            <tr>
+                <td>auditLogPath</td>
+                <td>~/.pawbot/logs/security_audit.jsonl</td>
+                <td>Path to audit log</td>
+            </tr>
+        </table>
+
+        <!-- Architecture -->
+        <h2 id="architecture">7. Architecture</h2>
+        <p>Pawbot's core modules:</p>
+        <table>
+            <tr>
+                <th>Module</th>
+                <th>Files</th>
+                <th>Purpose</th>
+            </tr>
+            <tr>
+                <td>Agent Loop</td>
+                <td>agent/loop.py</td>
+                <td>Core conversation loop with tool calling, complexity classification, pre/post-task reflection</td>
+            </tr>
+            <tr>
+                <td>Context Builder</td>
+                <td>agent/context.py</td>
+                <td>Budget-aware context assembly, relevance-based loading, prompt cache markers</td>
+            </tr>
+            <tr>
+                <td>Memory</td>
+                <td>agent/memory.py</td>
+                <td>SQLite fact store, vector embeddings, RAG retrieval, salience decay</td>
+            </tr>
+            <tr>
+                <td>Security</td>
+                <td>agent/security.py</td>
+                <td>Command sandboxing, injection detection, audit logging</td>
+            </tr>
+            <tr>
+                <td>Skills</td>
+                <td>agent/skills.py</td>
+                <td>Skill loading, execution, auto-creation from novel tasks</td>
+            </tr>
+            <tr>
+                <td>Subagents</td>
+                <td>agent/subagent.py</td>
+                <td>Parallel background execution pool with budget and concurrency control</td>
+            </tr>
+            <tr>
+                <td>Telemetry</td>
+                <td>agent/telemetry.py</td>
+                <td>OpenTelemetry spans, Prometheus metrics, trace export</td>
+            </tr>
+            <tr>
+                <td>Providers</td>
+                <td>providers/</td>
+                <td>LiteLLM routing, provider registry, model matching, OAuth flows</td>
+            </tr>
+            <tr>
+                <td>Channels</td>
+                <td>channels/</td>
+                <td>10 channel adapters with unified message bus interface</td>
+            </tr>
+            <tr>
+                <td>Message Bus</td>
+                <td>bus/queue.py</td>
+                <td>Async message routing between channels, agent, and subagents</td>
+            </tr>
+            <tr>
+                <td>Cron</td>
+                <td>cron/</td>
+                <td>Job scheduling with cron expressions, intervals, one-time runs</td>
+            </tr>
+            <tr>
+                <td>Heartbeat</td>
+                <td>heartbeat/</td>
+                <td>Proactive trigger engine with condition-based wake-ups</td>
+            </tr>
+            <tr>
+                <td>Config</td>
+                <td>config/</td>
+                <td>Pydantic schema, JSON loader, migration, env var support</td>
+            </tr>
+        </table>
+
+        <h3>Data directory</h3>
+        <div class="code">~/.pawbot/
+            ├── config.json <span class="cmt"># Main configuration</span>
+            ├── workspace/ <span class="cmt"># Agent workspace</span>
+            │ ├── SOUL.md <span class="cmt"># Agent identity</span>
+            │ ├── USER.md <span class="cmt"># User profile</span>
+            │ ├── TOOLS.md <span class="cmt"># Available tools</span>
+            │ ├── memory/
+            │ │ ├── MEMORY.md <span class="cmt"># Long-term memory</span>
+            │ │ └── HISTORY.md <span class="cmt"># Conversation history</span>
+            │ └── skills/ <span class="cmt"># User-created skills</span>
+            ├── cron/
+            │ └── jobs.json <span class="cmt"># Scheduled jobs</span>
+            └── logs/
+            ├── traces.jsonl <span class="cmt"># OpenTelemetry traces</span>
+            └── security_audit.jsonl</div>
+
+        <!-- Env Vars -->
+        <h2 id="env">8. Environment Variables</h2>
+        <p>All config fields can be set via env vars with prefix <code>PAWBOT_</code> and double-underscore nesting:</p>
+        <div class="code"><span class="cmt"># Equivalent to config.providers.openrouter.apiKey</span>
+            export PAWBOT_PROVIDERS__OPENROUTER__API_KEY="sk-or-v1-..."
+
+            <span class="cmt"># Equivalent to config.agents.defaults.model</span>
+            export PAWBOT_AGENTS__DEFAULTS__MODEL="anthropic/claude-sonnet-4-5"
+
+            <span class="cmt"># Equivalent to config.tools.web.search.apiKey</span>
+            export PAWBOT_TOOLS__WEB__SEARCH__API_KEY="BSA-..."
+        </div>
+        <p>Env vars take precedence over config.json values. The config class uses <code>pydantic-settings</code> with
+            <code>env_prefix="PAWBOT_"</code> and <code>env_nested_delimiter="__"</code>.</p>
+    </div>
+
+    <footer>
+        <p>🐾 Pawbot v0.1.4.post3 · MIT License · <a href="https://github.com/HKUDS/pawbot">GitHub</a> · <a
+                href="https://github.com/HKUDS/pawbot/issues">Issues</a> · <a href="install.html">Install</a></p>
+    </footer>
+
+    <script>
+        function copyCode(b) { const t = b.parentElement.textContent.replace(/Copy|Copied!/g, '').trim(); navigator.clipboard.writeText(t); b.textContent = 'Copied!'; setTimeout(() => b.textContent = 'Copy', 1500) }
+        document.querySelectorAll('.nav-links a').forEach(a => a.addEventListener('click', () => document.querySelector('.nav-links').classList.remove('show')));
+    </script>
+</body>
+
+</html>

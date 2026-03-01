@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pawbot Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#fafaf8;--surface:#fff;--card:#fff;--border:#e8e5e0;--text:#1a1815;--text-dim:#8a8578;--accent:#e87537;--accent2:#d45d20;--warm:#f5f0e8;--warm2:#ede6d8;--danger:#dc3545;--success:#22c55e;--warning:#f59e0b;--radius:12px;--shadow:0 1px 3px rgba(0,0,0,.04),0 4px 12px rgba(0,0,0,.03);--font:'DM Sans',system-ui,sans-serif;--mono:'DM Mono',monospace}
+body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex;min-height:100vh;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+a{color:var(--accent);text-decoration:none}
+
+/* Sidebar */
+.sidebar{width:240px;background:var(--surface);border-right:1px solid var(--border);padding:20px 0;display:flex;flex-direction:column;position:fixed;height:100vh;z-index:10;transition:transform .3s}
+.logo{padding:0 20px 24px;display:flex;align-items:center;gap:10px;font-size:18px;font-weight:700;color:var(--text)}
+.logo .icon{width:34px;height:34px;background:var(--accent);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:18px;color:#fff}
+.nav{flex:1;overflow-y:auto}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 20px;cursor:pointer;color:var(--text-dim);transition:all .2s;font-size:13px;font-weight:500;border-left:3px solid transparent}
+.nav-item:hover{color:var(--text);background:rgba(0,0,0,.02)}
+.nav-item.active{color:var(--accent);background:rgba(232,117,55,.05);border-left-color:var(--accent)}
+.nav-item .ni{width:20px;text-align:center;font-size:15px}
+.sidebar-footer{padding:16px 20px;border-top:1px solid var(--border);font-size:11px;color:var(--text-dim)}
+
+/* Main */
+.main{margin-left:240px;flex:1;padding:28px;min-height:100vh}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:28px;gap:16px;flex-wrap:wrap}
+.topbar h1{font-size:22px;font-weight:700}
+.topbar-actions{display:flex;gap:10px;align-items:center}
+.search-box{background:var(--warm);border:1px solid var(--border);border-radius:8px;padding:8px 14px;color:var(--text);font-size:13px;width:220px;outline:none;transition:border-color .2s;font-family:var(--font)}
+.search-box:focus{border-color:var(--accent)}
+
+/* Buttons */
+.btn{padding:8px 18px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:600;font-family:var(--font);transition:all .2s;display:inline-flex;align-items:center;gap:6px}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent2);transform:translateY(-1px)}
+.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text)}
+.btn-outline:hover{border-color:var(--accent);color:var(--accent)}
+.btn-danger{background:rgba(220,53,69,.08);color:var(--danger);border:1px solid rgba(220,53,69,.2)}
+.btn-sm{padding:5px 12px;font-size:12px}
+
+/* Cards */
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;box-shadow:var(--shadow);transition:all .3s;animation:fadeIn .4s ease}
+.card:hover{box-shadow:0 4px 16px rgba(0,0,0,.06)}
+.card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.card-title{font-size:15px;font-weight:600;display:flex;align-items:center;gap:8px}
+
+/* Grid */
+.grid{display:grid;gap:16px}.grid-2{grid-template-columns:repeat(auto-fill,minmax(340px,1fr))}.grid-3{grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}.grid-4{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
+
+/* Stat cards */
+.stat-card{text-align:center;padding:24px}
+.stat-value{font-size:28px;font-weight:700;color:var(--accent);margin:8px 0 4px}
+.stat-label{font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1.2px}
+.stat-icon{font-size:28px;margin-bottom:4px}
+
+/* Forms */
+.form-group{margin-bottom:16px}
+.form-label{display:block;font-size:12px;font-weight:500;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
+.form-input,.form-select{width:100%;background:var(--warm);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--text);font-size:13px;font-family:var(--font);outline:none;transition:border-color .2s}
+.form-input:focus,.form-select:focus{border-color:var(--accent)}
+.form-select option{background:var(--surface)}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.pw-wrap{position:relative}.pw-wrap .form-input{padding-right:36px}
+.pw-toggle{position:absolute;right:10px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--text-dim);font-size:14px;background:none;border:none}
+
+/* Toggle */
+.toggle{position:relative;width:44px;height:24px;cursor:pointer}
+.toggle input{display:none}
+.toggle .slider{position:absolute;inset:0;background:var(--border);border-radius:12px;transition:.3s}
+.toggle .slider::before{content:'';position:absolute;width:18px;height:18px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.3s;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.toggle input:checked+.slider{background:var(--accent)}
+.toggle input:checked+.slider::before{transform:translateX(20px)}
+
+/* Range */
+.range-wrap{display:flex;align-items:center;gap:12px}
+.range-wrap input[type=range]{flex:1;-webkit-appearance:none;height:5px;background:var(--border);border-radius:3px;outline:none}
+.range-wrap input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;background:var(--accent);border-radius:50%;cursor:pointer;box-shadow:0 1px 4px rgba(232,117,55,.3)}
+.range-val{min-width:50px;text-align:right;font-size:13px;font-weight:600;color:var(--accent)}
+
+/* Status dot */
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
+.dot-on{background:var(--success);box-shadow:0 0 6px rgba(34,197,94,.4)}
+.dot-off{background:var(--danger);box-shadow:0 0 6px rgba(220,53,69,.3)}
+.dot-warn{background:var(--warning);box-shadow:0 0 6px rgba(245,158,11,.3)}
+
+/* Channel/Provider card mini */
+.entity-card{padding:16px}
+.entity-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.entity-name{font-weight:600;font-size:14px;display:flex;align-items:center;gap:8px}
+.entity-body{display:none;padding-top:12px;border-top:1px solid var(--border)}
+.entity-card.open .entity-body{display:block}
+.entity-toggle-btn{background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:16px;transition:transform .2s}
+.entity-card.open .entity-toggle-btn{transform:rotate(180deg)}
+
+/* Section */
+.section{display:none}.section.active{display:block;animation:fadeIn .3s ease}
+.section-title{font-size:18px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.section-desc{color:var(--text-dim);font-size:13px;margin-bottom:20px;line-height:1.6}
+
+/* Code block */
+.code-block{background:var(--warm);border:1px solid var(--border);border-radius:8px;padding:14px;font-family:var(--mono);font-size:12px;color:var(--text);overflow-x:auto;position:relative;line-height:1.6}
+.copy-btn{position:absolute;top:8px;right:8px;background:var(--surface);border:1px solid var(--border);color:var(--text-dim);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;transition:all .2s;font-family:var(--font)}
+.copy-btn:hover{color:var(--accent);border-color:var(--accent)}
+
+/* Chips */
+.chip{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:500;margin:2px}
+.chip-cyan{background:rgba(232,117,55,.08);color:var(--accent)}
+.chip-purple{background:rgba(138,133,120,.1);color:var(--text-dim)}
+
+/* Badge */
+.badge{padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.badge-active{background:rgba(34,197,94,.08);color:var(--success)}
+.badge-inactive{background:rgba(220,53,69,.08);color:var(--danger)}
+
+/* Animations */
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.pulse{animation:pulse 2s infinite}
+
+/* Responsive */
+@media(max-width:768px){.sidebar{transform:translateX(-100%)}.sidebar.open{transform:translateX(0)}.main{margin-left:0}.grid-2,.grid-3,.grid-4{grid-template-columns:1fr}.form-row{grid-template-columns:1fr}.mobile-toggle{display:block!important}}
+.mobile-toggle{display:none;position:fixed;top:12px;left:12px;z-index:20;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:18px}
+</style>
+</head>
+<body>
+<button class="mobile-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
+
+<nav class="sidebar" id="sidebar"></nav>
+
+<main class="main" id="main"></main>
+
+<script>
+// ── Data ──
+const NAV = [
+  {id:'overview',icon:'📊',label:'Overview'},
+  {id:'agent',icon:'🧠',label:'Agent Config'},
+  {id:'channels',icon:'💬',label:'Channels'},
+  {id:'providers',icon:'🤖',label:'Providers'},
+  {id:'tools',icon:'🔧',label:'Tools & MCP'},
+  {id:'skills',icon:'🎯',label:'Skills'},
+  {id:'scheduling',icon:'⏰',label:'Scheduling'},
+  {id:'security',icon:'🛡️',label:'Security'},
+  {id:'observability',icon:'📡',label:'Observability'},
+  {id:'subagents',icon:'👥',label:'Subagents'},
+  {id:'gateway',icon:'🌐',label:'Gateway'},
+  {id:'lora',icon:'🧬',label:'LoRA'},
+  {id:'docker',icon:'🐳',label:'Docker'},
+];
+
+const CHANNELS = [
+  {name:'Telegram',key:'telegram',icon:'✈️',fields:[
+    {k:'token',l:'Bot Token',type:'pw'},{k:'allowFrom',l:'Allow From (comma-separated)',type:'text'},
+    {k:'proxy',l:'Proxy URL',type:'text'},{k:'replyToMessage',l:'Reply to Message',type:'toggle'}
+  ]},
+  {name:'Discord',key:'discord',icon:'🎮',fields:[
+    {k:'token',l:'Bot Token',type:'pw'},{k:'allowFrom',l:'Allow From',type:'text'},
+    {k:'gatewayUrl',l:'Gateway URL',type:'text'},{k:'intents',l:'Intents',type:'number'}
+  ]},
+  {name:'WhatsApp',key:'whatsapp',icon:'📱',fields:[
+    {k:'bridgeUrl',l:'Bridge URL',type:'text'},{k:'bridgeToken',l:'Bridge Token',type:'pw'},
+    {k:'allowFrom',l:'Allow From',type:'text'}
+  ]},
+  {name:'Feishu',key:'feishu',icon:'🐦',fields:[
+    {k:'appId',l:'App ID',type:'text'},{k:'appSecret',l:'App Secret',type:'pw'},
+    {k:'encryptKey',l:'Encrypt Key',type:'pw'},{k:'verificationToken',l:'Verification Token',type:'pw'},
+    {k:'allowFrom',l:'Allow From',type:'text'},{k:'reactEmoji',l:'React Emoji',type:'text'}
+  ]},
+  {name:'Mochat',key:'mochat',icon:'🐾',fields:[
+    {k:'baseUrl',l:'Base URL',type:'text'},{k:'socketUrl',l:'Socket URL',type:'text'},
+    {k:'socketPath',l:'Socket Path',type:'text'},{k:'clawToken',l:'Claw Token',type:'pw'},
+    {k:'agentUserId',l:'Agent User ID',type:'text'},{k:'replyDelayMode',l:'Reply Delay Mode',type:'text'},
+    {k:'replyDelayMs',l:'Reply Delay (ms)',type:'number'}
+  ]},
+  {name:'DingTalk',key:'dingtalk',icon:'📌',fields:[
+    {k:'clientId',l:'Client ID',type:'text'},{k:'clientSecret',l:'Client Secret',type:'pw'},
+    {k:'allowFrom',l:'Allow From',type:'text'}
+  ]},
+  {name:'Slack',key:'slack',icon:'💼',fields:[
+    {k:'botToken',l:'Bot Token',type:'pw'},{k:'appToken',l:'App Token',type:'pw'},
+    {k:'groupPolicy',l:'Group Policy',type:'select',opts:['mention','open','allowlist']},
+    {k:'reactEmoji',l:'React Emoji',type:'text'},{k:'replyInThread',l:'Reply in Thread',type:'toggle'}
+  ]},
+  {name:'Email',key:'email',icon:'📧',fields:[
+    {k:'imapHost',l:'IMAP Host',type:'text'},{k:'imapPort',l:'IMAP Port',type:'number'},
+    {k:'imapUsername',l:'IMAP Username',type:'text'},{k:'imapPassword',l:'IMAP Password',type:'pw'},
+    {k:'smtpHost',l:'SMTP Host',type:'text'},{k:'smtpPort',l:'SMTP Port',type:'number'},
+    {k:'smtpUsername',l:'SMTP Username',type:'text'},{k:'smtpPassword',l:'SMTP Password',type:'pw'},
+    {k:'fromAddress',l:'From Address',type:'text'},{k:'autoReplyEnabled',l:'Auto Reply',type:'toggle'},
+    {k:'pollIntervalSeconds',l:'Poll Interval (s)',type:'number'}
+  ]},
+  {name:'QQ',key:'qq',icon:'🐧',fields:[
+    {k:'appId',l:'App ID',type:'text'},{k:'secret',l:'Secret',type:'pw'},
+    {k:'allowFrom',l:'Allow From',type:'text'}
+  ]},
+  {name:'Matrix',key:'matrix',icon:'🔗',fields:[
+    {k:'homeserver',l:'Homeserver URL',type:'text'},{k:'userId',l:'User ID',type:'text'},
+    {k:'accessToken',l:'Access Token',type:'pw'},{k:'deviceId',l:'Device ID',type:'text'},
+    {k:'e2eeEnabled',l:'E2EE Enabled',type:'toggle'},
+    {k:'groupPolicy',l:'Group Policy',type:'select',opts:['open','mention','allowlist']},
+    {k:'allowFrom',l:'Allow From',type:'text'},{k:'maxMediaBytes',l:'Max Media Bytes',type:'number'}
+  ]}
+];
+
+const PROVIDERS = [
+  {name:'OpenRouter',key:'openrouter',desc:'Access to all models',color:'#e87537'},
+  {name:'Anthropic',key:'anthropic',desc:'Claude direct',color:'#d4a574'},
+  {name:'OpenAI',key:'openai',desc:'GPT direct',color:'#74aa9c'},
+  {name:'DeepSeek',key:'deepseek',desc:'DeepSeek direct',color:'#4a90d9'},
+  {name:'Groq',key:'groq',desc:'LLM + Whisper',color:'#f55036'},
+  {name:'Gemini',key:'gemini',desc:'Gemini direct',color:'#4285f4'},
+  {name:'MiniMax',key:'minimax',desc:'MiniMax direct',color:'#ff6b35'},
+  {name:'AiHubMix',key:'aihubmix',desc:'API gateway',color:'#9b59b6'},
+  {name:'SiliconFlow',key:'siliconflow',desc:'SiliconFlow',color:'#2ecc71'},
+  {name:'VolcEngine',key:'volcengine',desc:'VolcEngine',color:'#e74c3c'},
+  {name:'DashScope',key:'dashscope',desc:'Qwen',color:'#3498db'},
+  {name:'Moonshot',key:'moonshot',desc:'Kimi',color:'#f1c40f'},
+  {name:'Zhipu',key:'zhipu',desc:'GLM',color:'#1abc9c'},
+  {name:'vLLM',key:'vllm',desc:'Local / OpenAI-compat',color:'#e67e22'},
+  {name:'Custom',key:'custom',desc:'Any OpenAI-compat endpoint',color:'#95a5a6'},
+  {name:'OpenAI Codex',key:'openai_codex',desc:'OAuth login',color:'#74aa9c'},
+  {name:'GitHub Copilot',key:'github_copilot',desc:'OAuth login',color:'#6e5494'},
+];
+
+const SKILLS = ['clawhub','cron','github','memory','skill-creator','summarize','tmux','weather'];
+
+// ── Helpers ──
+const h = (tag, attrs, ...ch) => { const e=document.createElement(tag); if(attrs) Object.entries(attrs).forEach(([k,v])=>{if(k==='className')e.className=v;else if(k.startsWith('on'))e.addEventListener(k.slice(2).toLowerCase(),v);else e.setAttribute(k,v)}); ch.flat().forEach(c=>c!=null&&e.append(typeof c==='string'?document.createTextNode(c):c)); return e; };
+
+function fieldHTML(f, prefix) {
+  const id = `${prefix}_${f.k}`;
+  if (f.type==='toggle') return `<div class="form-group" style="display:flex;align-items:center;justify-content:space-between"><span class="form-label" style="margin:0">${f.l}</span><label class="toggle"><input type="checkbox" id="${id}"><span class="slider"></span></label></div>`;
+  if (f.type==='pw') return `<div class="form-group"><label class="form-label">${f.l}</label><div class="pw-wrap"><input class="form-input" type="password" id="${id}" placeholder="••••••••"><button class="pw-toggle" onclick="const i=this.previousElementSibling;i.type=i.type==='password'?'text':'password';this.textContent=i.type==='password'?'👁':'🙈'">👁</button></div></div>`;
+  if (f.type==='select') return `<div class="form-group"><label class="form-label">${f.l}</label><select class="form-select" id="${id}">${f.opts.map(o=>`<option>${o}</option>`).join('')}</select></div>`;
+  if (f.type==='number') return `<div class="form-group"><label class="form-label">${f.l}</label><input class="form-input" type="number" id="${id}"></div>`;
+  return `<div class="form-group"><label class="form-label">${f.l}</label><input class="form-input" type="text" id="${id}" placeholder="${f.l}"></div>`;
+}
+
+function entityCard(icon, name, key, fields, prefix) {
+  return `<div class="card entity-card" id="ec_${key}">
+    <div class="entity-header">
+      <div class="entity-name">${icon} ${name} <label class="toggle" style="margin-left:8px"><input type="checkbox" id="${prefix}_${key}_enabled"><span class="slider"></span></label></div>
+      <button class="entity-toggle-btn" onclick="this.closest('.entity-card').classList.toggle('open')">▼</button>
+    </div>
+    <div class="entity-body">${fields.map(f=>fieldHTML(f, `${prefix}_${key}`)).join('')}
+      <button class="btn btn-outline btn-sm" style="margin-top:8px">💾 Save</button>
+    </div>
+  </div>`;
+}
+
+function codeBlock(code, lang) {
+  return `<div class="code-block"><button class="copy-btn" onclick="navigator.clipboard.writeText(this.nextElementSibling.textContent);this.textContent='✓ Copied';setTimeout(()=>this.textContent='Copy',1500)">Copy</button><pre>${code}</pre></div>`;
+}
+
+function rangeField(id, label, min, max, val, step=1) {
+  return `<div class="form-group"><label class="form-label">${label}</label><div class="range-wrap"><input type="range" id="${id}" min="${min}" max="${max}" value="${val}" step="${step}" oninput="this.nextElementSibling.textContent=this.value"><span class="range-val">${val}</span></div></div>`;
+}
+
+function toggleField(id, label, checked=false) {
+  return `<div class="form-group" style="display:flex;align-items:center;justify-content:space-between"><span class="form-label" style="margin:0">${label}</span><label class="toggle"><input type="checkbox" id="${id}" ${checked?'checked':''}><span class="slider"></span></label></div>`;
+}
+
+function inputField(id, label, type='text', placeholder='', value='') {
+  return `<div class="form-group"><label class="form-label">${label}</label><input class="form-input" type="${type}" id="${id}" placeholder="${placeholder}" value="${value}"></div>`;
+}
+
+// ── Build Sidebar ──
+const sidebar = document.getElementById('sidebar');
+sidebar.innerHTML = `<div class="logo"><div class="icon">🐾</div>Pawbot</div><div class="nav" id="nav"></div><div class="sidebar-footer">v0.1.4.post3 · MIT License<br>Ultra-lightweight AI Assistant</div>`;
+const nav = document.getElementById('nav');
+NAV.forEach((n, i) => {
+  const item = h('div', {className:`nav-item${i===0?' active':''}`, 'data-section':n.id, onClick:()=>showSection(n.id)}, h('span',{className:'ni'},n.icon), n.label);
+  nav.append(item);
+});
+
+// ── Build Sections ──
+const main = document.getElementById('main');
+
+function showSection(id) {
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.getElementById('sec_'+id)?.classList.add('active');
+  document.querySelector(`.nav-item[data-section="${id}"]`)?.classList.add('active');
+  document.querySelector('.sidebar')?.classList.remove('open');
+}
+
+function buildSections() {
+  // ─ Overview ─
+  main.innerHTML = `
+  <div class="topbar"><h1>🐾 Pawbot Dashboard</h1><div class="topbar-actions"><input class="search-box" placeholder="Search settings..." oninput="filterSettings(this.value)"><button class="btn btn-primary" onclick="exportConfig()">📥 Export Config</button></div></div>
+
+  <section class="section active" id="sec_overview">
+    <div class="grid grid-4" style="margin-bottom:20px">
+      <div class="card stat-card"><div class="stat-icon">⚡</div><div class="stat-value">v0.1.4</div><div class="stat-label">Version</div></div>
+      <div class="card stat-card"><div class="stat-icon">🧠</div><div class="stat-value">Claude</div><div class="stat-label">Active Model</div></div>
+      <div class="card stat-card"><div class="stat-icon">💬</div><div class="stat-value">10</div><div class="stat-label">Channels</div></div>
+      <div class="card stat-card"><div class="stat-icon">🤖</div><div class="stat-value">16</div><div class="stat-label">Providers</div></div>
+    </div>
+    <div class="grid grid-3">
+      <div class="card stat-card"><div class="stat-icon">🔧</div><div class="stat-value">7</div><div class="stat-label">Built-in Tools</div></div>
+      <div class="card stat-card"><div class="stat-icon">🎯</div><div class="stat-value">8</div><div class="stat-label">Skills</div></div>
+      <div class="card stat-card"><div class="stat-icon">📏</div><div class="stat-value">~4,000</div><div class="stat-label">Lines of Code</div></div>
+    </div>
+    <div class="card" style="margin-top:20px">
+      <div class="card-title">🏗️ Architecture Overview</div>
+      <p class="section-desc">Pawbot is an ultra-lightweight personal AI assistant — 99% smaller than alternatives. It provides core agent functionality with multi-provider LLM support, 10 chat platform integrations, MCP tool servers, built-in skills, scheduling, security, and more.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <span class="chip chip-cyan">Agent Loop</span><span class="chip chip-purple">Context Builder</span>
+        <span class="chip chip-cyan">Memory</span><span class="chip chip-purple">Skills</span>
+        <span class="chip chip-cyan">Subagents</span><span class="chip chip-purple">Security</span>
+        <span class="chip chip-cyan">Telemetry</span><span class="chip chip-purple">MCP</span>
+        <span class="chip chip-cyan">Cron</span><span class="chip chip-purple">Heartbeat</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Agent -->
+  <section class="section" id="sec_agent">
+    <div class="section-title">🧠 Agent Configuration</div>
+    <p class="section-desc">Configure the core agent behavior including model selection, token limits, and reasoning parameters.</p>
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-title">Model & Provider</div>
+        ${inputField('agent_model','Model','text','anthropic/claude-opus-4-5','anthropic/claude-opus-4-5')}
+        <div class="form-group"><label class="form-label">Provider</label><select class="form-select" id="agent_provider"><option selected>auto</option>${PROVIDERS.map(p=>`<option value="${p.key}">${p.name}</option>`).join('')}</select></div>
+        ${inputField('agent_workspace','Workspace Path','text','~/.pawbot/workspace','~/.pawbot/workspace')}
+      </div>
+      <div class="card">
+        <div class="card-title">Parameters</div>
+        ${rangeField('agent_max_tokens','Max Tokens',1024,32768,8192,1024)}
+        ${rangeField('agent_temperature','Temperature',0,2,0.1,0.1)}
+        ${rangeField('agent_max_iterations','Max Tool Iterations',1,100,40)}
+        ${rangeField('agent_memory_window','Memory Window',10,500,100)}
+        <div class="form-group"><label class="form-label">Reasoning Effort</label><select class="form-select" id="agent_reasoning"><option value="">Default</option><option>low</option><option>medium</option><option>high</option></select></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Channels -->
+  <section class="section" id="sec_channels">
+    <div class="section-title">💬 Channels</div>
+    <p class="section-desc">Connect Pawbot to your favorite chat platforms. Enable a channel, add credentials, and start chatting.</p>
+    <div class="card" style="margin-bottom:16px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+      ${toggleField('channels_send_progress','Send Progress',true)}
+      ${toggleField('channels_send_tool_hints','Send Tool Hints')}
+    </div>
+    <div class="grid grid-2">${CHANNELS.map(c=>entityCard(c.icon,c.name,c.key,c.fields,'ch')).join('')}</div>
+  </section>
+
+  <!-- Providers -->
+  <section class="section" id="sec_providers">
+    <div class="section-title">🤖 Providers</div>
+    <p class="section-desc">Configure LLM providers. Add API keys and customize endpoints for each provider.</p>
+    <div class="grid grid-2">${PROVIDERS.map(p=>`<div class="card entity-card" id="ep_${p.key}">
+      <div class="entity-header">
+        <div class="entity-name"><span style="color:${p.color}">●</span> ${p.name} <span style="font-size:11px;color:var(--text-dim);font-weight:400">${p.desc}</span></div>
+        <button class="entity-toggle-btn" onclick="this.closest('.entity-card').classList.toggle('open')">▼</button>
+      </div>
+      <div class="entity-body">
+        ${fieldHTML({k:'apiKey',l:'API Key',type:'pw'},`prov_${p.key}`)}
+        ${inputField(`prov_${p.key}_apiBase`,'API Base URL','text','Default')}
+        <div class="form-group"><label class="form-label">Extra Headers (JSON)</label><textarea class="form-input" id="prov_${p.key}_headers" rows="2" placeholder='{"key": "value"}'></textarea></div>
+        <div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-outline btn-sm">🔌 Test</button><button class="btn btn-outline btn-sm">💾 Save</button></div>
+      </div>
+    </div>`).join('')}</div>
+  </section>
+
+  <!-- Tools & MCP -->
+  <section class="section" id="sec_tools">
+    <div class="section-title">🔧 Tools & MCP</div>
+    <p class="section-desc">Configure built-in tools and connect external MCP (Model Context Protocol) servers.</p>
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-title">🌐 Web Search</div>
+        ${fieldHTML({k:'apiKey',l:'Brave Search API Key',type:'pw'},'tool_web')}
+        ${rangeField('tool_web_max','Max Results',1,20,5)}
+      </div>
+      <div class="card">
+        <div class="card-title">💻 Shell Execution</div>
+        ${rangeField('tool_exec_timeout','Timeout (seconds)',5,300,60)}
+        ${inputField('tool_exec_path','Path Append','text','/usr/local/bin')}
+        ${toggleField('tool_restrict_workspace','Restrict to Workspace')}
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <div class="card-header"><div class="card-title">🔌 MCP Servers</div><button class="btn btn-primary btn-sm" onclick="addMCPServer()">+ Add Server</button></div>
+      <p class="section-desc" style="margin-top:0">MCP tools are auto-discovered on startup. Compatible with Claude Desktop / Cursor configs.</p>
+      <div id="mcp-list">
+        <div class="card entity-card" style="margin-bottom:8px">
+          <div class="entity-header"><div class="entity-name">📁 filesystem <span class="badge badge-active">active</span></div>
+            <button class="entity-toggle-btn" onclick="this.closest('.entity-card').classList.toggle('open')">▼</button></div>
+          <div class="entity-body">
+            ${inputField('mcp_fs_cmd','Command','text','npx','npx')}
+            ${inputField('mcp_fs_args','Args','text','-y, @modelcontextprotocol/server-filesystem, /path','-y, @modelcontextprotocol/server-filesystem, /path')}
+            ${rangeField('mcp_fs_timeout','Tool Timeout (s)',5,300,30)}
+            ${toggleField('mcp_fs_enabled','Enabled',true)}
+            ${toggleField('mcp_fs_confirm','Requires Confirmation',true)}
+            <button class="btn btn-danger btn-sm" style="margin-top:8px">🗑 Remove</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Skills -->
+  <section class="section" id="sec_skills">
+    <div class="section-title">🎯 Skills</div>
+    <p class="section-desc">Manage the skill system. Skills are reusable agent capabilities that extend Pawbot's functionality.</p>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">Skill System Settings</div>
+      ${toggleField('skills_enabled','Skills Enabled',true)}
+      ${toggleField('skills_auto_create','Auto-create after novel System 2 tasks',true)}
+      ${inputField('skills_dir','Skills Directory','text','~/pawbot/skills','~/pawbot/skills')}
+    </div>
+    <div class="section-title" style="font-size:15px">Built-in Skills</div>
+    <div class="grid grid-4">${SKILLS.map(s=>`<div class="card" style="text-align:center;padding:16px;cursor:pointer;transition:all .2s" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+      <div style="font-size:24px;margin-bottom:8px">${{clawhub:'🦞',cron:'⏰',github:'🐙',memory:'🧠','skill-creator':'🛠️',summarize:'📝',tmux:'🖥️',weather:'🌤️'}[s]}</div>
+      <div style="font-size:13px;font-weight:600">${s}</div>
+    </div>`).join('')}</div>
+  </section>
+
+  <!-- Scheduling -->
+  <section class="section" id="sec_scheduling">
+    <div class="section-title">⏰ Scheduling</div>
+    <p class="section-desc">Configure cron jobs and the heartbeat system for periodic background tasks.</p>
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-title">📅 Cron Scheduler</div>
+        ${toggleField('cron_enabled','Enabled',true)}
+        ${inputField('cron_registry','Registry Path','text','~/.pawbot/crons.json','~/.pawbot/crons.json')}
+        ${rangeField('cron_interval','Check Interval (s)',5,120,30)}
+        <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px">
+          <div style="font-size:12px;font-weight:600;margin-bottom:8px">CLI Commands</div>
+          ${codeBlock('pawbot cron add --name "daily" --cron "0 9 * * *" --message "Hello!"\npawbot cron list\npawbot cron remove <job_id>')}
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">💓 Heartbeat</div>
+        ${toggleField('hb_enabled','Enabled',true)}
+        ${rangeField('hb_interval','Interval (minutes)',5,120,30)}
+        <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
+        <div class="card-title" style="font-size:13px">Engine (Phase 11)</div>
+        ${toggleField('hb_engine_enabled','Engine Enabled',true)}
+        ${rangeField('hb_engine_check','Check Interval (minutes)',1,60,5)}
+        ${inputField('hb_triggers','Triggers Path','text','~/.pawbot/heartbeat_triggers.json','~/.pawbot/heartbeat_triggers.json')}
+      </div>
+    </div>
+  </section>
+
+  <!-- Security -->
+  <section class="section" id="sec_security">
+    <div class="section-title">🛡️ Security</div>
+    <p class="section-desc">Configure security policies to sandbox the agent and prevent dangerous operations.</p>
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-title">Access Control</div>
+        ${toggleField('sec_enabled','Security Layer Enabled',true)}
+        ${toggleField('sec_confirm','Confirm Dangerous Commands',true)}
+        ${toggleField('sec_block_root','Block Root Execution',true)}
+        ${toggleField('sec_injection','Injection Detection',true)}
+      </div>
+      <div class="card">
+        <div class="card-title">Memory & Logging</div>
+        ${rangeField('sec_salience','Min Memory Salience',0,1,0.2,0.05)}
+        ${rangeField('sec_mem_tokens','Max Memory Tokens',50,1000,300)}
+        ${inputField('sec_audit','Audit Log Path','text','~/.pawbot/logs/security_audit.jsonl','~/.pawbot/logs/security_audit.jsonl')}
+      </div>
+    </div>
+  </section>
+
+  <!-- Observability -->
+  <section class="section" id="sec_observability">
+    <div class="section-title">📡 Observability</div>
+    <p class="section-desc">Configure tracing, metrics, and monitoring for production deployments.</p>
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-title">Tracing</div>
+        ${toggleField('obs_enabled','Enabled',true)}
+        ${inputField('obs_trace','Trace File','text','~/.pawbot/logs/traces.jsonl','~/.pawbot/logs/traces.jsonl')}
+        ${inputField('obs_otlp','OTLP Endpoint','text','http://localhost:4317')}
+        ${rangeField('obs_sample','Sample Rate',0,1,1.0,0.1)}
+      </div>
+      <div class="card">
+        <div class="card-title">Metrics & Privacy</div>
+        ${inputField('obs_prom','Prometheus Port','number','','0')}
+        ${toggleField('obs_tool_args','Include Tool Args')}
+        ${toggleField('obs_mem_content','Include Memory Content')}
+      </div>
+    </div>
+  </section>
+
+  <!-- Subagents -->
+  <section class="section" id="sec_subagents">
+    <div class="section-title">👥 Subagents</div>
+    <p class="section-desc">Configure the subagent pool for parallel background task execution.</p>
+    <div class="card" style="max-width:500px">
+      ${toggleField('sub_enabled','Subagents Enabled',true)}
+      ${rangeField('sub_concurrent','Max Concurrent',1,10,3)}
+      ${rangeField('sub_budget_tokens','Default Budget (tokens)',10000,200000,50000,5000)}
+      ${rangeField('sub_budget_seconds','Default Budget (seconds)',30,1200,300,30)}
+      ${toggleField('sub_inbox','Inbox Review After Subgoal',true)}
+    </div>
+  </section>
+
+  <!-- Gateway -->
+  <section class="section" id="sec_gateway">
+    <div class="section-title">🌐 Gateway</div>
+    <p class="section-desc">Configure the gateway server that connects all channels and services.</p>
+    <div class="card" style="max-width:500px">
+      ${inputField('gw_host','Host','text','0.0.0.0','0.0.0.0')}
+      ${inputField('gw_port','Port','number','18790','18790')}
+      <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
+      <div class="card-title" style="font-size:13px;margin-bottom:12px">Heartbeat sub-config</div>
+      ${toggleField('gw_hb_enabled','Heartbeat Enabled',true)}
+      ${rangeField('gw_hb_interval','Interval (minutes)',5,120,30)}
+    </div>
+  </section>
+
+  <!-- LoRA -->
+  <section class="section" id="sec_lora">
+    <div class="section-title">🧬 LoRA Fine-tuning</div>
+    <p class="section-desc">Configure LoRA-based fine-tuning for personalized model adaptation.</p>
+    <div class="card" style="max-width:500px">
+      ${toggleField('lora_enabled','LoRA Enabled')}
+      ${toggleField('lora_auto','Auto Train')}
+      ${rangeField('lora_min','Min Examples',10,1000,100)}
+      ${inputField('lora_model','Base Model','text','meta-llama/Meta-Llama-3.1-8B','meta-llama/Meta-Llama-3.1-8B')}
+      ${inputField('lora_dataset','Dataset Path','text','~/.pawbot/training/dataset.jsonl','~/.pawbot/training/dataset.jsonl')}
+      ${inputField('lora_output','Output Directory','text','~/.pawbot/models/pawbot-lora','~/.pawbot/models/pawbot-lora')}
+    </div>
+  </section>
+
+  <!-- Docker -->
+  <section class="section" id="sec_docker">
+    <div class="section-title">🐳 Docker Deployment</div>
+    <p class="section-desc">Deploy Pawbot using Docker or Docker Compose for production environments.</p>
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-title">Docker Compose</div>
+        ${codeBlock('# First-time setup\ndocker compose run --rm pawbot-cli onboard\nvim ~/.pawbot/config.json\n\n# Start gateway\ndocker compose up -d pawbot-gateway\n\n# CLI single command\ndocker compose run --rm pawbot-cli agent -m "Hello!"\n\n# View logs\ndocker compose logs -f pawbot-gateway\n\n# Stop\ndocker compose down')}
+      </div>
+      <div class="card">
+        <div class="card-title">Docker CLI</div>
+        ${codeBlock('# Build image\ndocker build -t pawbot .\n\n# Initialize (first time)\ndocker run -v ~/.pawbot:/root/.pawbot --rm pawbot onboard\n\n# Run gateway\ndocker run -v ~/.pawbot:/root/.pawbot -p 18790:18790 pawbot gateway\n\n# Single command\ndocker run -v ~/.pawbot:/root/.pawbot --rm pawbot agent -m "Hello!"\n\n# Check status\ndocker run -v ~/.pawbot:/root/.pawbot --rm pawbot status')}
+      </div>
+      <div class="card" style="grid-column:1/-1">
+        <div class="card-title">🐧 Linux Systemd Service</div>
+        ${codeBlock('[Unit]\nDescription=Pawbot Gateway\nAfter=network.target\n\n[Service]\nType=simple\nExecStart=%h/.local/bin/pawbot gateway\nRestart=always\nRestartSec=10\n\n[Install]\nWantedBy=default.target')}
+        <div style="margin-top:12px">
+          ${codeBlock('systemctl --user daemon-reload\nsystemctl --user enable --now pawbot-gateway\nsystemctl --user status pawbot-gateway\njournalctl --user -u pawbot-gateway -f')}
+        </div>
+      </div>
+    </div>
+  </section>`;
+}
+
+buildSections();
+
+// ── Config Export ──
+function exportConfig() {
+  const cfg = { agents: { defaults: {} }, channels: {}, providers: {}, tools: {}, gateway: {} };
+  const v = id => document.getElementById(id)?.value || '';
+  const c = id => document.getElementById(id)?.checked || false;
+  cfg.agents.defaults = { model: v('agent_model'), provider: v('agent_provider'), maxTokens: +v('agent_max_tokens')||8192, temperature: +v('agent_temperature')||0.1, maxToolIterations: +v('agent_max_iterations')||40, memoryWindow: +v('agent_memory_window')||100, workspace: v('agent_workspace') };
+  const r = v('agent_reasoning'); if(r) cfg.agents.defaults.reasoningEffort = r;
+  CHANNELS.forEach(ch => { const en = c(`ch_${ch.key}_enabled`); if(en) { cfg.channels[ch.key] = { enabled: true }; ch.fields.forEach(f => { const val = f.type==='toggle' ? c(`ch_${ch.key}_${f.k}`) : v(`ch_${ch.key}_${f.k}`); if(val) cfg.channels[ch.key][f.k] = val; }); }});
+  PROVIDERS.forEach(p => { const key = v(`prov_${p.key}_apiKey`); if(key) { cfg.providers[p.key] = { apiKey: key }; const base = v(`prov_${p.key}_apiBase`); if(base) cfg.providers[p.key].apiBase = base; }});
+  cfg.gateway = { host: v('gw_host')||'0.0.0.0', port: +(v('gw_port'))||18790 };
+  const json = JSON.stringify(cfg, null, 2);
+  const blob = new Blob([json], {type:'application/json'});
+  const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='config.json'; a.click();
+}
+
+function addMCPServer() {
+  const name = prompt('MCP Server name:');
+  if(!name) return;
+  const id = name.replace(/\W/g,'_');
+  const html = `<div class="card entity-card" style="margin-bottom:8px">
+    <div class="entity-header"><div class="entity-name">🔌 ${name} <span class="badge badge-inactive">new</span></div>
+      <button class="entity-toggle-btn" onclick="this.closest('.entity-card').classList.toggle('open')">▼</button></div>
+    <div class="entity-body">
+      ${inputField(`mcp_${id}_cmd`,'Command','text','npx')}
+      ${inputField(`mcp_${id}_args`,'Args (comma-separated)','text')}
+      ${inputField(`mcp_${id}_url`,'URL (for HTTP mode)','text','https://')}
+      ${rangeField(`mcp_${id}_timeout`,'Tool Timeout (s)',5,300,30)}
+      ${toggleField(`mcp_${id}_enabled`,'Enabled',true)}
+      ${toggleField(`mcp_${id}_confirm`,'Requires Confirmation',true)}
+      <button class="btn btn-danger btn-sm" style="margin-top:8px" onclick="this.closest('.entity-card').remove()">🗑 Remove</button>
+    </div>
+  </div>`;
+  document.getElementById('mcp-list').insertAdjacentHTML('beforeend', html);
+}
+
+function filterSettings(q) {
+  q = q.toLowerCase();
+  document.querySelectorAll('.form-group, .entity-card, .card').forEach(el => {
+    const text = el.textContent.toLowerCase();
+    el.style.display = !q || text.includes(q) ? '' : 'none';
+  });
+}
+</script>
+</body>
+</html>

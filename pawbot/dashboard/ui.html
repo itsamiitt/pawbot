@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pawbot Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#080808;--surface:#111111;--border:#222222;--text:#F0F0F0;--muted:#666666;--dim:#333333;--green:#00FF88;--green-10:rgba(0,255,136,0.12);--green-40:rgba(0,255,136,0.25);--warn:#FFB800;--error:#FF4444;--cyan:#00CCFF;--purple:#CC88FF;--radius:4px;--mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif}
+html,body{height:100%;overflow:hidden}
+body{display:flex;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:13px;-webkit-font-smoothing:antialiased}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+a{color:var(--green);text-decoration:none}
+
+/* Loading bar */
+#loading{position:fixed;top:0;left:0;width:0;height:1px;background:var(--green);z-index:9999;transition:width .3s}
+
+/* Sidebar */
+#sidebar{width:220px;flex-shrink:0;border-right:1px solid var(--border);display:flex;flex-direction:column;background:var(--bg);height:100vh}
+.logo{display:flex;align-items:center;gap:10px;padding:20px 16px;font-family:var(--mono);font-size:14px;font-weight:600;letter-spacing:.08em;color:var(--green)}
+.logo-mark{font-size:18px}
+nav{flex:1;overflow-y:auto;padding:8px 0}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 16px;font-family:var(--mono);font-size:13px;color:var(--muted);text-decoration:none;border-left:2px solid transparent;transition:all 150ms;cursor:pointer}
+.nav-item:hover{color:var(--text);background:#141414}
+.nav-item.active{color:var(--green);border-left-color:var(--green);background:var(--green-10)}
+.status-dot{width:8px;height:8px;border-radius:50%;background:var(--dim);flex-shrink:0}
+.status-dot.online{background:var(--green);animation:pulse 3s infinite}
+.status-dot.offline{background:var(--error)}
+.status-dot.warn{background:var(--warn)}
+.sidebar-footer{padding:16px;border-top:1px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--dim)}
+.sidebar-footer .version{color:var(--muted);margin-bottom:4px}
+.health-dots{display:flex;gap:6px;margin-top:6px}
+
+/* Content */
+#content{flex:1;overflow-y:auto;padding:32px;height:100vh}
+.section{display:none}
+.section.active{display:block}
+
+/* Section headers */
+.section-title{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:8px}
+
+/* Stat bar */
+.stat-bar{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:24px;overflow:hidden}
+.stat{background:var(--surface);padding:20px;text-align:center}
+.stat-label{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.stat-value{font-family:var(--mono);font-size:22px;font-weight:600;color:var(--text)}
+.stat-value .status-dot{display:inline-block;margin-right:6px;vertical-align:middle}
+
+/* Panels */
+.panel{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);padding:20px;margin-bottom:16px}
+.panel-title{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:16px}
+.panel-row{display:flex;gap:16px;margin-bottom:16px}
+.panel-row>.panel{flex:1;margin-bottom:0}
+
+/* Tables */
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)}
+td{padding:10px 12px;border-bottom:1px solid #181818;color:var(--text)}
+tr:hover td{background:#141414;transition:background 100ms}
+
+/* Buttons */
+.btn{padding:6px 14px;font-family:var(--mono);font-size:12px;border:1px solid var(--border);border-radius:var(--radius);background:transparent;color:var(--text);cursor:pointer;transition:all 100ms;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{border-color:var(--text);background:#1a1a1a}
+.btn-primary{border-color:var(--green);color:var(--green)}
+.btn-primary:hover{background:var(--green-10)}
+.btn-danger{border-color:var(--error);color:var(--error)}
+.btn-danger:hover{background:rgba(255,68,68,.06)}
+.btn-warn{border-color:var(--warn);color:var(--warn)}
+.btn-sm{padding:4px 10px;font-size:11px}
+.btn-group{display:flex;gap:8px}
+
+/* Inputs */
+input,textarea,select{background:#0d0d0d;border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:var(--mono);font-size:13px;padding:8px 12px;outline:none;transition:border-color 100ms;width:100%}
+input:focus,textarea:focus,select:focus{border-color:var(--green)}
+select{cursor:pointer}
+textarea{resize:vertical;line-height:1.5}
+label{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:4px}
+.field{margin-bottom:14px}
+
+/* Toggle */
+.toggle{position:relative;display:inline-block;width:36px;height:20px;cursor:pointer}
+.toggle input{display:none}
+.toggle span{position:absolute;inset:0;background:var(--border);border-radius:10px;transition:.2s}
+.toggle span::before{content:'';position:absolute;width:14px;height:14px;left:3px;top:3px;background:var(--muted);border-radius:50%;transition:.2s}
+.toggle input:checked+span{background:var(--green)}
+.toggle input:checked+span::before{transform:translateX(16px);background:#fff}
+
+/* Badges */
+.badge{display:inline-block;padding:2px 8px;border-radius:var(--radius);font-family:var(--mono);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+.badge-ok{background:rgba(0,255,136,.1);color:var(--green)}
+.badge-error{background:rgba(255,68,68,.1);color:var(--error)}
+.badge-warn{background:rgba(255,184,0,.1);color:var(--warn)}
+.badge-info{background:rgba(0,204,255,.1);color:var(--cyan)}
+.badge-purple{background:rgba(204,136,255,.1);color:var(--purple)}
+
+/* Toast */
+#toast-container{position:fixed;bottom:24px;right:24px;display:flex;flex-direction:column;gap:8px;z-index:1000}
+.toast{padding:10px 16px;border-radius:var(--radius);font-family:var(--mono);font-size:12px;border-left:3px solid;animation:slideIn 150ms ease}
+.toast.success{background:#001a0d;border-color:var(--green);color:var(--green)}
+.toast.error{background:#1a0000;border-color:var(--error);color:var(--error)}
+
+/* Log viewer */
+.log-viewport{max-height:400px;overflow-y:auto;font-family:var(--mono);font-size:12px;line-height:1.5;padding:8px 0}
+.log-line{display:flex;gap:12px;padding:2px 0;animation:fadeUp 150ms ease}
+.log-ts{color:var(--dim);white-space:nowrap;min-width:90px}
+.log-level{font-weight:600;white-space:nowrap;min-width:48px}
+.log-level.TOOL{color:var(--cyan)}
+.log-level.MEM{color:var(--purple)}
+.log-level.LLM{color:var(--green)}
+.log-level.ERR{color:var(--error)}
+.log-level.WARN{color:var(--warn)}
+.log-level.INFO{color:var(--muted)}
+.log-msg{word-break:break-all}
+
+/* Chat */
+.chat-messages{max-height:280px;overflow-y:auto;padding:8px 0;margin-bottom:12px;font-size:13px}
+.chat-msg{padding:6px 0;display:flex;gap:8px}
+.chat-msg .role{font-family:var(--mono);font-size:11px;font-weight:600;min-width:60px;flex-shrink:0}
+.chat-msg .role.user{color:var(--muted)}
+.chat-msg .role.assistant{color:var(--green)}
+.chat-input{display:flex;gap:8px}
+.chat-input input{flex:1}
+
+/* Bar chart */
+.bar-row{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+.bar-label{font-family:var(--mono);font-size:12px;color:var(--muted);min-width:140px;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar-track{flex:1;height:14px;background:#181818;border-radius:2px;overflow:hidden}
+.bar-fill{height:100%;background:var(--green);border-radius:2px;transition:width .3s}
+.bar-value{font-family:var(--mono);font-size:11px;color:var(--text);min-width:70px}
+
+/* Channel panel */
+.channel-panel{margin-bottom:16px}
+.channel-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.channel-name{font-family:var(--mono);font-size:13px;font-weight:600}
+.channel-field{display:flex;gap:12px;align-items:center;margin-bottom:8px;font-family:var(--mono);font-size:12px}
+.channel-field .lbl{color:var(--muted);min-width:100px}
+.channel-field .val{color:var(--text);word-break:break-all}
+
+/* Skill cards */
+.skills-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.skill-card{cursor:pointer;transition:border-color 100ms}
+.skill-card:hover{border-color:var(--green)}
+.skill-name{font-family:var(--mono);font-size:13px;font-weight:600;margin-bottom:4px}
+.skill-desc{font-size:12px;color:var(--muted);line-height:1.4;margin-bottom:8px}
+.skill-meta{font-family:var(--mono);font-size:10px;color:var(--dim)}
+
+/* Config tree */
+.config-layout{display:flex;gap:16px}
+.config-tree{width:220px;flex-shrink:0}
+.config-tree-item{padding:8px 12px;font-family:var(--mono);font-size:12px;color:var(--muted);cursor:pointer;border-left:2px solid transparent;transition:all 100ms}
+.config-tree-item:hover{color:var(--text);background:#141414}
+.config-tree-item.active{color:var(--green);border-left-color:var(--green)}
+.config-tree-item.indent{padding-left:24px;font-size:11px}
+.config-editor{flex:1}
+
+/* Danger zone */
+.danger-zone{border-top:1px solid var(--error);padding-top:20px;margin-top:32px}
+.danger-zone h3{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--error);margin-bottom:12px}
+
+/* Animations */
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+@keyframes slideIn{from{transform:translateX(20px);opacity:0}to{transform:none;opacity:1}}
+@keyframes fadeUp{from{transform:translateY(4px);opacity:0}to{transform:none;opacity:1}}
+</style>
+</head>
+<body>
+
+<div id="loading"></div>
+
+<aside id="sidebar">
+  <div class="logo">
+    <span class="logo-mark">🐾</span>
+    <span>PAWBOT</span>
+  </div>
+  <nav>
+    <a class="nav-item active" data-section="overview"><span class="status-dot" id="dot-agent"></span>Overview</a>
+    <a class="nav-item" data-section="agent">Agent</a>
+    <a class="nav-item" data-section="memory">Memory</a>
+    <a class="nav-item" data-section="channels">Channels</a>
+    <a class="nav-item" data-section="cron">Cron</a>
+    <a class="nav-item" data-section="subagents">Subagents</a>
+    <a class="nav-item" data-section="skills">Skills</a>
+    <a class="nav-item" data-section="config">Config</a>
+    <a class="nav-item" data-section="logs">Logs</a>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="version">v0.1.4.post3</div>
+    <div class="health-dots" id="sidebar-health"></div>
+  </div>
+</aside>
+
+<main id="content">
+  <!-- OVERVIEW -->
+  <div class="section active" id="sec-overview">
+    <div class="stat-bar" id="stat-bar"></div>
+    <div class="panel-row">
+      <div class="panel" style="flex:6">
+        <div class="panel-title">Live Agent Log</div>
+        <div class="log-viewport" id="overview-log"></div>
+      </div>
+      <div class="panel" style="flex:4">
+        <div class="panel-title">Quick Chat</div>
+        <div class="chat-messages" id="chat-messages"></div>
+        <div class="chat-input">
+          <input type="text" id="chat-input" placeholder="Send a message…" onkeydown="if(event.key==='Enter')sendChat()">
+          <button class="btn btn-primary btn-sm" onclick="sendChat()">Send</button>
+        </div>
+        <div class="panel-title" style="margin-top:20px">System Health</div>
+        <div id="health-checks"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AGENT -->
+  <div class="section" id="sec-agent">
+    <div class="section-title">Agent Configuration</div>
+    <div class="panel-row">
+      <div class="panel">
+        <div class="panel-title">Model &amp; Provider</div>
+        <div class="field"><label>Model</label><input id="agent-model" placeholder="anthropic/claude-opus-4-5"></div>
+        <div class="field"><label>Provider</label><select id="agent-provider"><option value="auto">auto</option></select></div>
+        <div class="field"><label>Max Tokens</label><input type="number" id="agent-max-tokens" value="8192"></div>
+        <div class="field"><label>Temperature</label><input type="number" step="0.1" id="agent-temp" value="0.1"></div>
+        <div class="field"><label>Max Tool Iterations</label><input type="number" id="agent-iterations" value="40"></div>
+        <button class="btn btn-primary" onclick="saveAgentModel()">Save Changes</button>
+      </div>
+      <div class="panel">
+        <div class="panel-title">System Prompt (SOUL.md)</div>
+        <textarea id="agent-soul" rows="14" style="width:100%;min-height:200px"></textarea>
+        <div style="margin-top:8px"><button class="btn btn-primary" onclick="saveSoul()">Save &amp; Reload</button></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Agent Controls</div>
+      <div class="btn-group">
+        <button class="btn btn-danger" onclick="if(confirm('Stop the agent?'))toast('Agent control not implemented yet','error')">● Stop Agent</button>
+        <button class="btn btn-warn" onclick="if(confirm('Restart the agent?'))toast('Agent control not implemented yet','error')">↺ Restart Agent</button>
+        <button class="btn btn-danger" onclick="if(confirm('Clear all context?'))toast('Agent control not implemented yet','error')">✕ Clear Context</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MEMORY -->
+  <div class="section" id="sec-memory">
+    <div class="section-title">Memory Browser</div>
+    <div style="display:flex;gap:12px;margin-bottom:16px;align-items:center">
+      <input id="mem-search" placeholder="Search memories…" style="flex:1" oninput="loadMemory()">
+      <button class="btn" onclick="loadMemory()">Search</button>
+      <button class="btn btn-primary" onclick="exportMemory()">⤓ Export All</button>
+    </div>
+    <div style="display:flex;gap:16px">
+      <div style="flex:1">
+        <table>
+          <thead><tr><th>#</th><th>Type</th><th>Content</th><th>Salience</th></tr></thead>
+          <tbody id="mem-table"></tbody>
+        </table>
+        <div id="mem-pagination" style="margin-top:12px;font-family:var(--mono);font-size:12px;color:var(--muted)"></div>
+      </div>
+      <div class="panel" style="width:200px;flex-shrink:0">
+        <div class="panel-title">Memory Stats</div>
+        <div id="mem-stats" style="font-family:var(--mono);font-size:12px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CHANNELS -->
+  <div class="section" id="sec-channels">
+    <div class="section-title">Channels</div>
+    <div id="channels-list"></div>
+  </div>
+
+  <!-- CRON -->
+  <div class="section" id="sec-cron">
+    <div class="section-title">Cron Jobs</div>
+    <div style="margin-bottom:16px"><button class="btn btn-primary" onclick="toggleNewCron()">+ New Job</button></div>
+    <div class="panel" id="new-cron-form" style="display:none;margin-bottom:16px">
+      <div class="field"><label>Name</label><input id="cron-name" placeholder="daily-greeting"></div>
+      <div class="field"><label>Message</label><input id="cron-msg" placeholder="Good morning! What's on my calendar?"></div>
+      <div class="field"><label>Cron Expression</label><input id="cron-expr" placeholder="0 9 * * *"></div>
+      <div class="btn-group"><button class="btn btn-primary" onclick="createCron()">Create Job</button><button class="btn" onclick="toggleNewCron()">Cancel</button></div>
+    </div>
+    <table>
+      <thead><tr><th>Name</th><th>Schedule</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody id="cron-table"></tbody>
+    </table>
+  </div>
+
+  <!-- SUBAGENTS -->
+  <div class="section" id="sec-subagents">
+    <div class="section-title">Subagents</div>
+    <div id="subagents-active" style="margin-bottom:16px"></div>
+    <div class="panel">
+      <div class="panel-title">Spawn Subagent</div>
+      <div class="field"><label>Task</label><input id="sub-task" placeholder="Research recent AI papers on memory systems"></div>
+      <div style="display:flex;gap:12px;align-items:end">
+        <div class="field" style="flex:1"><label>Role</label><select id="sub-role"><option>researcher</option><option>coder</option><option>reviewer</option></select></div>
+        <div class="field" style="width:120px"><label>Budget (tokens)</label><input type="number" id="sub-budget" value="8000"></div>
+        <button class="btn btn-primary" onclick="spawnSubagent()" style="margin-bottom:14px">▶ Spawn</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SKILLS -->
+  <div class="section" id="sec-skills">
+    <div class="section-title">Skills</div>
+    <div id="skills-grid" class="skills-grid"></div>
+    <div id="skills-stats" style="margin-top:16px;font-family:var(--mono);font-size:12px;color:var(--muted)"></div>
+  </div>
+
+  <!-- CONFIG -->
+  <div class="section" id="sec-config">
+    <div class="section-title">Configuration</div>
+    <div style="margin-bottom:12px">
+      <button class="btn btn-sm" id="config-mode-typed" onclick="setConfigMode('typed')" style="border-color:var(--green);color:var(--green)">Typed Editor</button>
+      <button class="btn btn-sm" id="config-mode-raw" onclick="setConfigMode('raw')">Raw JSON</button>
+    </div>
+    <div id="config-typed">
+      <div class="config-layout">
+        <div class="config-tree" id="config-tree"></div>
+        <div class="config-editor panel" id="config-editor"><div style="color:var(--dim)">Select a section from the tree.</div></div>
+      </div>
+    </div>
+    <div id="config-raw" style="display:none">
+      <textarea id="config-json" rows="24" style="width:100%;font-family:var(--mono);font-size:12px"></textarea>
+      <div style="margin-top:8px"><button class="btn btn-primary" onclick="saveRawConfig()">Apply Raw</button></div>
+    </div>
+    <div class="danger-zone">
+      <h3>Danger Zone</h3>
+      <div class="btn-group">
+        <button class="btn btn-danger" onclick="dangerAction('reset')">Reset Config to Defaults</button>
+        <button class="btn btn-danger" onclick="dangerAction('wipe')">Wipe All Memory</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- LOGS -->
+  <div class="section" id="sec-logs">
+    <div class="section-title">Logs</div>
+    <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px">
+      <div class="field" style="margin:0;width:180px"><select id="log-file" onchange="loadLogs()"><option>agent.log</option><option>gateway.log</option><option>security_audit.jsonl</option><option>traces.jsonl</option></select></div>
+      <div class="field" style="margin:0;width:120px"><select id="log-level" onchange="loadLogs()"><option>ALL</option><option>TOOL</option><option>MEM</option><option>LLM</option><option>ERR</option><option>WARN</option><option>INFO</option></select></div>
+      <input id="log-search" placeholder="Search logs…" style="flex:1" oninput="loadLogs()">
+      <button class="btn btn-sm" id="log-tail-btn" onclick="toggleTail()">↓ Tail</button>
+      <button class="btn btn-sm" onclick="downloadLog()">⤓ Download</button>
+    </div>
+    <div class="panel">
+      <div class="log-viewport" id="log-viewport" style="max-height:600px"></div>
+    </div>
+  </div>
+</main>
+
+<div id="toast-container"></div>
+
+<script>
+// ── API client ──────────────────────────────────────────────────────────────
+const api = async (url, opts = {}) => {
+  const el = document.getElementById('loading');
+  el.style.width = '60%';
+  try {
+    const r = await fetch(url, {
+      headers: {'Content-Type': 'application/json', ...opts.headers},
+      ...opts,
+      body: opts.body ? JSON.stringify(opts.body) : undefined
+    });
+    el.style.width = '100%';
+    setTimeout(() => { el.style.width = '0'; }, 300);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return await r.json();
+  } catch (e) {
+    el.style.width = '0';
+    toast(e.message, 'error');
+    throw e;
+  }
+};
+const GET = (url) => api(url);
+const POST = (url, body) => api(url, {method: 'POST', body});
+const PUT = (url, body) => api(url, {method: 'PUT', body});
+const DEL = (url) => api(url, {method: 'DELETE'});
+
+// ── Toast ───────────────────────────────────────────────────────────────────
+function toast(msg, type = 'success') {
+  const c = document.getElementById('toast-container');
+  const t = document.createElement('div');
+  t.className = `toast ${type}`;
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+
+// ── Router ──────────────────────────────────────────────────────────────────
+let currentSection = 'overview';
+
+function navigate(section) {
+  currentSection = section;
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const sec = document.getElementById('sec-' + section);
+  const nav = document.querySelector(`.nav-item[data-section="${section}"]`);
+  if (sec) sec.classList.add('active');
+  if (nav) nav.classList.add('active');
+  // Load section data
+  const loaders = {
+    overview: loadOverview,
+    agent: loadAgent,
+    memory: loadMemory,
+    channels: loadChannels,
+    cron: loadCron,
+    subagents: loadSubagents,
+    skills: loadSkills,
+    config: loadConfig,
+    logs: loadLogs,
+  };
+  if (loaders[section]) loaders[section]();
+}
+
+document.querySelectorAll('.nav-item').forEach(n => {
+  n.addEventListener('click', (e) => {
+    e.preventDefault();
+    navigate(n.dataset.section);
+  });
+});
+
+// ── OVERVIEW ────────────────────────────────────────────────────────────────
+async function loadOverview() {
+  try {
+    const data = await GET('/api/overview');
+    const dot = document.getElementById('dot-agent');
+    dot.className = `status-dot ${data.agent_status}`;
+    document.getElementById('stat-bar').innerHTML = `
+      <div class="stat"><div class="stat-label">Agent Status</div><div class="stat-value"><span class="status-dot ${data.agent_status}"></span>${data.agent_status.toUpperCase()}</div></div>
+      <div class="stat"><div class="stat-label">Memory Items</div><div class="stat-value">${data.memory_count.toLocaleString()}</div></div>
+      <div class="stat"><div class="stat-label">Active Channels</div><div class="stat-value">${data.active_channels.enabled}/${data.active_channels.total}</div></div>
+      <div class="stat"><div class="stat-label">Cron Jobs</div><div class="stat-value">${data.cron_jobs}</div></div>
+    `;
+  } catch (e) {}
+  try {
+    const h = await GET('/api/health');
+    const el = document.getElementById('health-checks');
+    el.innerHTML = h.checks.map(c => `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <span class="status-dot ${c.status === 'ok' ? 'online' : c.status === 'warn' ? 'warn' : 'offline'}"></span>
+        <span style="font-family:var(--mono);font-size:12px">${c.label}</span>
+        ${c.status !== 'ok' ? `<span style="font-size:11px;color:var(--dim)">${c.fix}</span>` : ''}
+      </div>
+    `).join('');
+    // Sidebar health dots
+    const dots = document.getElementById('sidebar-health');
+    const ok = h.checks.filter(c => c.status === 'ok').length;
+    const total = h.checks.length;
+    dots.innerHTML = h.checks.slice(0, 5).map(c => `<span class="status-dot ${c.status === 'ok' ? 'online' : c.status === 'warn' ? 'warn' : 'offline'}" title="${c.label}"></span>`).join('');
+  } catch (e) {}
+  loadOverviewLogs();
+}
+
+async function loadOverviewLogs() {
+  try {
+    const data = await GET('/api/logs/agent.log?tail=50');
+    const el = document.getElementById('overview-log');
+    el.innerHTML = data.lines.map(l => renderLogLine(l)).join('');
+    el.scrollTop = el.scrollHeight;
+  } catch (e) {
+    document.getElementById('overview-log').innerHTML = '<div style="color:var(--dim)">No log data available</div>';
+  }
+}
+
+function renderLogLine(line) {
+  const match = line.match(/^(\d{2}:\d{2}:\d{2}[\d.]*)\s+\[(\w+)]\s+(.*)/);
+  if (match) {
+    return `<div class="log-line"><span class="log-ts">${match[1]}</span><span class="log-level ${match[2]}">[${match[2]}]</span><span class="log-msg">${escHtml(match[3])}</span></div>`;
+  }
+  return `<div class="log-line"><span class="log-msg">${escHtml(line)}</span></div>`;
+}
+
+// ── CHAT ────────────────────────────────────────────────────────────────────
+let chatHistory = [];
+
+async function sendChat() {
+  const input = document.getElementById('chat-input');
+  const msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+  chatHistory.push({role: 'user', content: msg});
+  renderChat();
+  try {
+    const data = await POST('/api/chat', {message: msg});
+    chatHistory.push({role: 'assistant', content: data.response || '(no response)'});
+    renderChat();
+  } catch (e) {
+    chatHistory.push({role: 'assistant', content: '(error: ' + e.message + ')'});
+    renderChat();
+  }
+}
+
+function renderChat() {
+  const el = document.getElementById('chat-messages');
+  el.innerHTML = chatHistory.map(m => `
+    <div class="chat-msg"><span class="role ${m.role}">${m.role}</span><span>${escHtml(m.content)}</span></div>
+  `).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+// ── AGENT ───────────────────────────────────────────────────────────────────
+async function loadAgent() {
+  try {
+    const data = await GET('/api/agent');
+    document.getElementById('agent-model').value = data.model;
+    document.getElementById('agent-max-tokens').value = data.maxTokens;
+    document.getElementById('agent-temp').value = data.temperature;
+    document.getElementById('agent-iterations').value = data.maxToolIterations;
+    document.getElementById('agent-soul').value = data.soul;
+  } catch (e) {}
+}
+
+async function saveAgentModel() {
+  const model = document.getElementById('agent-model').value;
+  await POST('/api/agent/model', {model});
+  toast('Model updated');
+}
+
+async function saveSoul() {
+  const content = document.getElementById('agent-soul').value;
+  await POST('/api/agent/soul', {content});
+  toast('SOUL.md saved');
+}
+
+// ── MEMORY ──────────────────────────────────────────────────────────────────
+let memPage = 1;
+
+async function loadMemory() {
+  const search = document.getElementById('mem-search')?.value || '';
+  try {
+    const data = await GET(`/api/memory?page=${memPage}&search=${encodeURIComponent(search)}`);
+    const tbody = document.getElementById('mem-table');
+    tbody.innerHTML = data.items.map((m, i) => `
+      <tr>
+        <td>${(data.page - 1) * 50 + i + 1}</td>
+        <td><span class="badge badge-info">${m.type}</span></td>
+        <td>${escHtml(m.content.substring(0, 80))}${m.content.length > 80 ? '…' : ''}</td>
+        <td>${m.salience}</td>
+      </tr>
+    `).join('') || '<tr><td colspan="4" style="color:var(--dim)">No memories found</td></tr>';
+    document.getElementById('mem-pagination').textContent = `Showing page ${data.page} of ${data.pages} (${data.total} total)`;
+    const stats = data.stats;
+    const statsEl = document.getElementById('mem-stats');
+    let html = '';
+    for (const [type, count] of Object.entries(stats.by_type || {})) {
+      html += `<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>${type}</span><span>${count}</span></div>`;
+    }
+    html += `<div style="border-top:1px solid var(--border);padding-top:8px;margin-top:8px"><div style="display:flex;justify-content:space-between"><span>TOTAL</span><span>${stats.total}</span></div></div>`;
+    statsEl.innerHTML = html;
+  } catch (e) {}
+}
+
+async function exportMemory() {
+  window.open('/api/memory/export', '_blank');
+}
+
+// ── CHANNELS ────────────────────────────────────────────────────────────────
+const CHANNEL_NAMES = {telegram:'Telegram',discord:'Discord',whatsapp:'WhatsApp',slack:'Slack',email:'Email',matrix:'Matrix',feishu:'Feishu',dingtalk:'DingTalk',qq:'QQ',mochat:'Mochat'};
+
+async function loadChannels() {
+  try {
+    const data = await GET('/api/channels');
+    const el = document.getElementById('channels-list');
+    const chs = data.channels || {};
+    el.innerHTML = Object.entries(chs).map(([key, cfg]) => {
+      const name = CHANNEL_NAMES[key] || key;
+      const enabled = cfg.enabled;
+      const fields = Object.entries(cfg).filter(([k]) => k !== 'enabled').map(([k, v]) => {
+        const isSecret = ['token','appSecret','bridgeToken','clawToken','clientSecret','botToken','appToken','imapPassword','smtpPassword','accessToken','secret'].includes(k);
+        const display = isSecret ? _mask(String(v)) : String(v);
+        return `<div class="channel-field"><span class="lbl">${k}</span><span class="val">${escHtml(display)}</span></div>`;
+      }).join('');
+      return `
+        <div class="panel channel-panel">
+          <div class="channel-header">
+            <span class="channel-name">${name}</span>
+            <span class="badge ${enabled ? 'badge-ok' : 'badge-error'}">${enabled ? 'ENABLED' : 'DISABLED'}</span>
+          </div>
+          ${fields}
+        </div>
+      `;
+    }).join('') || '<div style="color:var(--dim)">No channels configured</div>';
+  } catch (e) {}
+}
+
+function _mask(v) { return v.length > 8 ? v.substring(0, 4) + '••••••••' : '••••••••'; }
+
+// ── CRON ────────────────────────────────────────────────────────────────────
+function toggleNewCron() {
+  const el = document.getElementById('new-cron-form');
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+async function loadCron() {
+  try {
+    const data = await GET('/api/cron');
+    const tbody = document.getElementById('cron-table');
+    const jobs = data.jobs || [];
+    if (Array.isArray(jobs)) {
+      tbody.innerHTML = jobs.map(j => `
+        <tr>
+          <td style="font-family:var(--mono)">${escHtml(j.name || j.id || '—')}</td>
+          <td style="font-family:var(--mono)">${escHtml(j.schedule || j.cron || '—')}</td>
+          <td><span class="status-dot ${j.enabled !== false ? 'online' : 'offline'}"></span>${j.enabled !== false ? 'Active' : 'Paused'}</td>
+          <td><button class="btn btn-danger btn-sm" onclick="deleteCron('${j.id}')">Delete</button></td>
+        </tr>
+      `).join('');
+    } else {
+      tbody.innerHTML = '<tr><td colspan="4" style="color:var(--dim)">No cron jobs</td></tr>';
+    }
+  } catch (e) {
+    document.getElementById('cron-table').innerHTML = '<tr><td colspan="4" style="color:var(--dim)">No cron jobs</td></tr>';
+  }
+}
+
+async function createCron() {
+  const name = document.getElementById('cron-name').value;
+  const message = document.getElementById('cron-msg').value;
+  const schedule = document.getElementById('cron-expr').value;
+  if (!name || !message || !schedule) return toast('All fields required', 'error');
+  await POST('/api/cron', {name, message, schedule});
+  toast('Cron job created');
+  toggleNewCron();
+  loadCron();
+}
+
+async function deleteCron(id) {
+  if (!confirm('Delete this cron job?')) return;
+  await DEL('/api/cron/' + id);
+  toast('Cron job deleted');
+  loadCron();
+}
+
+// ── SUBAGENTS ───────────────────────────────────────────────────────────────
+async function loadSubagents() {
+  try {
+    const data = await GET('/api/subagents');
+    const el = document.getElementById('subagents-active');
+    if (data.active && data.active.length > 0) {
+      el.innerHTML = data.active.map(a => `
+        <div class="panel"><div class="panel-title">${a.id || 'subagent'}</div><div>${a.task || '—'}</div></div>
+      `).join('');
+    } else {
+      el.innerHTML = '<div style="color:var(--dim);font-family:var(--mono);font-size:12px">No active subagents</div>';
+    }
+  } catch (e) {}
+}
+
+async function spawnSubagent() {
+  const task = document.getElementById('sub-task').value;
+  const role = document.getElementById('sub-role').value;
+  const budget = document.getElementById('sub-budget').value;
+  if (!task) return toast('Task is required', 'error');
+  await POST('/api/subagents/spawn', {task, role, budget: +budget});
+  toast('Subagent spawned');
+  loadSubagents();
+}
+
+// ── SKILLS ──────────────────────────────────────────────────────────────────
+async function loadSkills() {
+  try {
+    const data = await GET('/api/skills');
+    const el = document.getElementById('skills-grid');
+    const skills = data.skills || [];
+    el.innerHTML = skills.map(s => `
+      <div class="panel skill-card">
+        <div class="skill-name">${escHtml(s.name)}</div>
+        <div class="skill-desc">${escHtml(s.description || 'No description')}</div>
+        <div class="skill-meta">${s.builtin ? 'BUILT-IN' : 'CUSTOM'}</div>
+      </div>
+    `).join('') || '<div style="color:var(--dim)">No skills found</div>';
+    document.getElementById('skills-stats').textContent = `Total skills: ${skills.length}`;
+  } catch (e) {}
+}
+
+// ── CONFIG ──────────────────────────────────────────────────────────────────
+let configData = {};
+let configMode = 'typed';
+
+function setConfigMode(mode) {
+  configMode = mode;
+  document.getElementById('config-typed').style.display = mode === 'typed' ? 'block' : 'none';
+  document.getElementById('config-raw').style.display = mode === 'raw' ? 'block' : 'none';
+  document.getElementById('config-mode-typed').style.borderColor = mode === 'typed' ? 'var(--green)' : 'var(--border)';
+  document.getElementById('config-mode-typed').style.color = mode === 'typed' ? 'var(--green)' : 'var(--text)';
+  document.getElementById('config-mode-raw').style.borderColor = mode === 'raw' ? 'var(--green)' : 'var(--border)';
+  document.getElementById('config-mode-raw').style.color = mode === 'raw' ? 'var(--green)' : 'var(--text)';
+  if (mode === 'raw') {
+    document.getElementById('config-json').value = JSON.stringify(configData, null, 2);
+  }
+}
+
+async function loadConfig() {
+  try {
+    configData = await GET('/api/config');
+    renderConfigTree();
+    if (configMode === 'raw') {
+      document.getElementById('config-json').value = JSON.stringify(configData, null, 2);
+    }
+  } catch (e) {}
+}
+
+function renderConfigTree() {
+  const tree = document.getElementById('config-tree');
+  const sections = Object.keys(configData).filter(k => typeof configData[k] === 'object' && configData[k] !== null);
+  tree.innerHTML = sections.map(s => {
+    const sub = typeof configData[s] === 'object' ? Object.keys(configData[s]) : [];
+    let html = `<div class="config-tree-item" onclick="showConfigSection('${s}')">${s}</div>`;
+    sub.forEach(k => {
+      if (typeof configData[s][k] === 'object' && configData[s][k] !== null) {
+        html += `<div class="config-tree-item indent" onclick="showConfigSection('${s}.${k}')">${k}</div>`;
+      }
+    });
+    return html;
+  }).join('');
+}
+
+function showConfigSection(path) {
+  document.querySelectorAll('.config-tree-item').forEach(i => i.classList.remove('active'));
+  event.target.classList.add('active');
+  const parts = path.split('.');
+  let data = configData;
+  for (const p of parts) data = data?.[p];
+  if (!data || typeof data !== 'object') {
+    document.getElementById('config-editor').innerHTML = `<div style="color:var(--dim)">No configuration data for ${path}</div>`;
+    return;
+  }
+  let html = `<div class="panel-title">${path.toUpperCase()}</div>`;
+  for (const [key, val] of Object.entries(data)) {
+    if (typeof val === 'object' && val !== null) continue;
+    const type = typeof val === 'boolean' ? 'toggle' : typeof val === 'number' ? 'number' : 'text';
+    const isSecret = key.toLowerCase().includes('key') || key.toLowerCase().includes('token') || key.toLowerCase().includes('secret') || key.toLowerCase().includes('password');
+    if (type === 'toggle') {
+      html += `<div class="field" style="display:flex;justify-content:space-between;align-items:center"><label style="margin:0">${key}</label><label class="toggle"><input type="checkbox" data-path="${path}.${key}" ${val ? 'checked' : ''} onchange="updateConfigField('${path}.${key}', this.checked)"><span></span></label></div>`;
+    } else {
+      html += `<div class="field"><label>${key}</label><input type="${isSecret ? 'password' : type}" value="${escHtml(String(val))}" onchange="updateConfigField('${path}.${key}', this.value)"></div>`;
+    }
+  }
+  html += `<button class="btn btn-primary" onclick="saveConfig()">Save Changes</button>`;
+  document.getElementById('config-editor').innerHTML = html;
+}
+
+function updateConfigField(path, value) {
+  const parts = path.split('.');
+  let obj = configData;
+  for (let i = 0; i < parts.length - 1; i++) {
+    obj = obj[parts[i]] = obj[parts[i]] || {};
+  }
+  obj[parts[parts.length - 1]] = value;
+}
+
+async function saveConfig() {
+  await PUT('/api/config', configData);
+  toast('Config saved');
+}
+
+async function saveRawConfig() {
+  try {
+    const raw = JSON.parse(document.getElementById('config-json').value);
+    await PUT('/api/config/raw', raw);
+    configData = raw;
+    toast('Raw config applied');
+  } catch (e) {
+    toast('Invalid JSON: ' + e.message, 'error');
+  }
+}
+
+async function dangerAction(action) {
+  const confirm = prompt('Type CONFIRM to proceed:');
+  if (confirm !== 'CONFIRM') return toast('Cancelled', 'error');
+  if (action === 'reset') {
+    await POST('/api/config/reset', {confirm: 'CONFIRM'});
+    toast('Config reset to defaults');
+    loadConfig();
+  }
+}
+
+// ── LOGS ────────────────────────────────────────────────────────────────────
+let tailEnabled = false;
+let tailInterval = null;
+
+async function loadLogs() {
+  const file = document.getElementById('log-file').value;
+  const level = document.getElementById('log-level').value;
+  const search = document.getElementById('log-search').value;
+  try {
+    const data = await GET(`/api/logs/${file}?tail=200&level=${level}&search=${encodeURIComponent(search)}`);
+    const el = document.getElementById('log-viewport');
+    el.innerHTML = data.lines.map(l => renderLogLine(l)).join('') || '<div style="color:var(--dim)">No log lines</div>';
+    if (tailEnabled) el.scrollTop = el.scrollHeight;
+  } catch (e) {
+    document.getElementById('log-viewport').innerHTML = '<div style="color:var(--dim)">Log file not found</div>';
+  }
+}
+
+function toggleTail() {
+  tailEnabled = !tailEnabled;
+  const btn = document.getElementById('log-tail-btn');
+  btn.style.borderColor = tailEnabled ? 'var(--green)' : 'var(--border)';
+  btn.style.color = tailEnabled ? 'var(--green)' : 'var(--text)';
+  if (tailEnabled) {
+    tailInterval = setInterval(loadLogs, 1000);
+  } else {
+    clearInterval(tailInterval);
+  }
+}
+
+function downloadLog() {
+  const file = document.getElementById('log-file').value;
+  window.open(`/api/logs/${file}/download`, '_blank');
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// ── Polling ─────────────────────────────────────────────────────────────────
+setInterval(() => {
+  if (currentSection === 'overview') loadOverview();
+}, 5000);
+
+// ── Init ────────────────────────────────────────────────────────────────────
+navigate('overview');
+</script>
+</body>
+</html>

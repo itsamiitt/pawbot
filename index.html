@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pawbot — Ultra-Lightweight Personal AI Assistant</title>
+    <meta name="description"
+        content="Pawbot is a ~4,000-line personal AI assistant with 16 LLM providers, 10 chat channels, MCP servers, memory, skills, and scheduling.">
+    <link
+        href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box
+        }
+
+        :root {
+            --bg: #fafaf8;
+            --surface: #fff;
+            --card: #fff;
+            --border: #e8e5e0;
+            --text: #1a1815;
+            --dim: #8a8578;
+            --accent: #e87537;
+            --accent2: #d45d20;
+            --warm: #f5f0e8;
+            --warm2: #ede6d8;
+            --warm3: #c4a882;
+            --mono: 'DM Mono', monospace;
+            --font: 'DM Sans', system-ui, sans-serif;
+            --radius: 12px;
+            --shadow: 0 1px 3px rgba(0, 0, 0, .04), 0 4px 12px rgba(0, 0, 0, .03)
+        }
+
+        html {
+            scroll-behavior: smooth
+        }
+
+        body {
+            font-family: var(--font);
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.7;
+            -webkit-font-smoothing: antialiased
+        }
+
+        /* Nav */
+        nav {
+            position: fixed;
+            top: 0;
+            width: 100%;
+            z-index: 100;
+            transition: all .4s ease
+        }
+
+        nav.scrolled {
+            background: rgba(250, 250, 248, .92);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border)
+        }
+
+        .nav-inner {
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: 14px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center
+        }
+
+        .nav-logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 700;
+            font-size: 17px;
+            color: var(--text);
+            text-decoration: none
+        }
+
+        .nav-logo .paw {
+            width: 30px;
+            height: 30px;
+            background: var(--accent);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            color: #fff
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 24px;
+            align-items: center
+        }
+
+        .nav-links a {
+            color: var(--dim);
+            font-size: 14px;
+            font-weight: 500;
+            text-decoration: none;
+            transition: color .2s
+        }
+
+        .nav-links a:hover {
+            color: var(--text)
+        }
+
+        .nav-links a.active {
+            color: var(--accent)
+        }
+
+        .btn-nav {
+            background: var(--accent) !important;
+            color: #fff !important;
+            padding: 7px 18px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600
+        }
+
+        .btn-nav:hover {
+            opacity: .9
+        }
+
+        .mobile-nav {
+            display: none;
+            background: none;
+            border: none;
+            font-size: 22px;
+            cursor: pointer;
+            color: var(--text)
+        }
+
+        /* Hero */
+        .hero {
+            min-height: 92vh;
+            display: flex;
+            align-items: center;
+            padding: 120px 24px 80px;
+            position: relative;
+            overflow: hidden
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: -30%;
+            right: -20%;
+            width: 700px;
+            height: 700px;
+            background: radial-gradient(circle, rgba(232, 117, 55, .06) 0%, transparent 70%);
+            pointer-events: none;
+            animation: drift 20s ease-in-out infinite
+        }
+
+        .hero-inner {
+            max-width: 1080px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 60px;
+            align-items: center;
+            width: 100%
+        }
+
+        .hero-text {
+            animation: fadeUp .7s ease
+        }
+
+        .hero-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--accent);
+            letter-spacing: .5px;
+            text-transform: uppercase;
+            margin-bottom: 20px
+        }
+
+        .hero-label .dot {
+            width: 5px;
+            height: 5px;
+            background: var(--accent);
+            border-radius: 50%;
+            animation: pulse 2s infinite
+        }
+
+        .hero h1 {
+            font-size: clamp(36px, 5vw, 54px);
+            font-weight: 700;
+            line-height: 1.1;
+            margin-bottom: 18px;
+            color: var(--text)
+        }
+
+        .hero h1 em {
+            font-style: normal;
+            color: var(--accent)
+        }
+
+        .hero-desc {
+            font-size: 17px;
+            color: var(--dim);
+            max-width: 460px;
+            margin-bottom: 32px
+        }
+
+        .hero-actions {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            font-family: var(--font);
+            cursor: pointer;
+            border: none;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all .2s
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #fff
+        }
+
+        .btn-primary:hover {
+            background: var(--accent2);
+            transform: translateY(-1px)
+        }
+
+        .btn-ghost {
+            background: transparent;
+            color: var(--text);
+            border: 1.5px solid var(--border)
+        }
+
+        .btn-ghost:hover {
+            border-color: var(--accent);
+            color: var(--accent)
+        }
+
+        .hero-cmd {
+            margin-top: 28px;
+            animation: fadeUp .7s ease .2s both
+        }
+
+        .hero-cmd pre {
+            background: var(--warm);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 14px 20px;
+            font-family: var(--mono);
+            font-size: 13px;
+            color: var(--text);
+            display: inline-block;
+            position: relative
+        }
+
+        .hero-cmd .cp {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--dim);
+            border-radius: 6px;
+            padding: 3px 10px;
+            font-size: 11px;
+            cursor: pointer;
+            font-family: var(--font);
+            transition: all .2s
+        }
+
+        .hero-cmd .cp:hover {
+            color: var(--accent);
+            border-color: var(--accent)
+        }
+
+        .hero-visual {
+            animation: fadeUp .7s ease .15s both;
+            position: relative
+        }
+
+        .hero-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: var(--shadow);
+            position: relative
+        }
+
+        .hero-card::before {
+            content: '';
+            position: absolute;
+            top: -1px;
+            left: 24px;
+            right: 24px;
+            height: 3px;
+            background: var(--accent);
+            border-radius: 0 0 3px 3px
+        }
+
+        .hc-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 9px 0;
+            border-bottom: 1px solid rgba(0, 0, 0, .04);
+            font-size: 13px
+        }
+
+        .hc-row:last-child {
+            border: none
+        }
+
+        .hc-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            flex-shrink: 0
+        }
+
+        .hc-label {
+            color: var(--dim);
+            width: 90px;
+            flex-shrink: 0
+        }
+
+        .hc-value {
+            font-weight: 500;
+            font-family: var(--mono);
+            font-size: 12px
+        }
+
+        @keyframes drift {
+
+            0%,
+            100% {
+                transform: translate(0, 0)
+            }
+
+            50% {
+                transform: translate(-30px, 20px)
+            }
+        }
+
+        @keyframes fadeUp {
+            from {
+                opacity: 0;
+                transform: translateY(16px)
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0)
+            }
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1
+            }
+
+            50% {
+                opacity: .3
+            }
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-8px)
+            }
+
+            to {
+                opacity: 1;
+                transform: translateX(0)
+            }
+        }
+
+        /* Stats */
+        .stats {
+            max-width: 1080px;
+            margin: -30px auto 0;
+            padding: 0 24px;
+            position: relative;
+            z-index: 2
+        }
+
+        .stats-inner {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            box-shadow: var(--shadow)
+        }
+
+        .st {
+            text-align: center;
+            padding: 24px 12px;
+            border-right: 1px solid var(--border)
+        }
+
+        .st:last-child {
+            border: none
+        }
+
+        .st-num {
+            font-size: 26px;
+            font-weight: 700;
+            color: var(--accent)
+        }
+
+        .st-lbl {
+            font-size: 11px;
+            color: var(--dim);
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            margin-top: 2px
+        }
+
+        /* Section */
+        section {
+            padding: 90px 24px
+        }
+
+        .container {
+            max-width: 1080px;
+            margin: 0 auto
+        }
+
+        .sec-label {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--accent);
+            margin-bottom: 10px
+        }
+
+        .sec-title {
+            font-size: clamp(26px, 4vw, 36px);
+            font-weight: 700;
+            line-height: 1.15;
+            margin-bottom: 12px
+        }
+
+        .sec-desc {
+            color: var(--dim);
+            font-size: 16px;
+            max-width: 520px
+        }
+
+        .sec-warm {
+            background: var(--warm)
+        }
+
+        /* Features */
+        .feat-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 14px;
+            margin-top: 44px
+        }
+
+        .feat {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 24px;
+            transition: all .3s;
+            cursor: default
+        }
+
+        .feat:hover {
+            border-color: var(--warm3);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, .04);
+            transform: translateY(-2px)
+        }
+
+        .feat-icon {
+            font-size: 22px;
+            margin-bottom: 12px
+        }
+
+        .feat h3 {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 6px
+        }
+
+        .feat p {
+            font-size: 13px;
+            color: var(--dim);
+            line-height: 1.6
+        }
+
+        /* Providers/Channels chips */
+        .chip-grid {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 24px
+        }
+
+        .chip {
+            padding: 8px 16px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all .2s
+        }
+
+        .chip:hover {
+            border-color: var(--accent);
+            color: var(--accent)
+        }
+
+        /* Code */
+        .code {
+            background: var(--warm);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px 20px;
+            font-family: var(--mono);
+            font-size: 13px;
+            color: var(--text);
+            overflow-x: auto;
+            position: relative;
+            line-height: 1.7;
+            margin: 12px 0
+        }
+
+        .code .cmt {
+            color: var(--dim)
+        }
+
+        .code button {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--dim);
+            border-radius: 6px;
+            padding: 3px 10px;
+            font-size: 11px;
+            cursor: pointer;
+            font-family: var(--font);
+            transition: all .2s
+        }
+
+        .code button:hover {
+            color: var(--accent);
+            border-color: var(--accent)
+        }
+
+        /* CTA */
+        .cta {
+            text-align: center
+        }
+
+        .cta-box {
+            max-width: 540px;
+            margin: 0 auto;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 48px 36px;
+            box-shadow: var(--shadow)
+        }
+
+        .cta-box h2 {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 10px
+        }
+
+        .cta-box p {
+            color: var(--dim);
+            margin-bottom: 24px;
+            font-size: 15px
+        }
+
+        /* Footer */
+        footer {
+            padding: 36px 24px;
+            text-align: center;
+            border-top: 1px solid var(--border)
+        }
+
+        footer p {
+            font-size: 13px;
+            color: var(--dim)
+        }
+
+        footer a {
+            color: var(--dim);
+            text-decoration: none
+        }
+
+        footer a:hover {
+            color: var(--accent)
+        }
+
+        /* Responsive */
+        @media(max-width:768px) {
+            .nav-links {
+                display: none
+            }
+
+            .mobile-nav {
+                display: block
+            }
+
+            .hero-inner {
+                grid-template-columns: 1fr
+            }
+
+            .hero-visual {
+                display: none
+            }
+
+            .stats-inner {
+                grid-template-columns: repeat(2, 1fr)
+            }
+
+            .st {
+                border-bottom: 1px solid var(--border)
+            }
+
+            .st:nth-child(2) {
+                border-right: none
+            }
+
+            .st:nth-last-child(-n+2) {
+                border-bottom: none
+            }
+
+            .feat-grid {
+                grid-template-columns: 1fr
+            }
+        }
+
+        .nav-links.show {
+            display: flex !important;
+            position: fixed;
+            top: 56px;
+            left: 0;
+            right: 0;
+            background: rgba(250, 250, 248, .97);
+            backdrop-filter: blur(16px);
+            flex-direction: column;
+            padding: 16px 24px;
+            gap: 12px;
+            border-bottom: 1px solid var(--border)
+        }
+    </style>
+</head>
+
+<body>
+    <nav id="navbar">
+        <div class="nav-inner">
+            <a href="index.html" class="nav-logo">
+                <div class="paw">🐾</div>Pawbot
+            </a>
+            <div class="nav-links">
+                <a href="index.html" class="active">Home</a>
+                <a href="install.html">Install</a>
+                <a href="docs.html">Docs</a>
+                <a href="https://github.com/HKUDS/pawbot" target="_blank" class="btn-nav">GitHub</a>
+            </div>
+            <button class="mobile-nav"
+                onclick="document.querySelector('.nav-links').classList.toggle('show')">☰</button>
+        </div>
+    </nav>
+
+    <section class="hero">
+        <div class="hero-inner">
+            <div class="hero-text">
+                <div class="hero-label"><span class="dot"></span> v0.1.4 — Open Source</div>
+                <h1>A personal AI assistant that's <em>absurdly small.</em></h1>
+                <p class="hero-desc">~4,000 lines of Python. 16 LLM providers. 10 chat channels. MCP tool servers.
+                    Memory. Skills. Scheduling. Security. Everything you need, nothing you don't.</p>
+                <div class="hero-actions">
+                    <a href="install.html" class="btn btn-primary">Get Started →</a>
+                    <a href="docs.html" class="btn btn-ghost">Read the Docs</a>
+                </div>
+                <div class="hero-cmd">
+                    <pre><span style="color:var(--dim)">$</span> pip install pawbot-ai<button class="cp" onclick="copyText(this,'pip install pawbot-ai')">Copy</button></pre>
+                </div>
+            </div>
+            <div class="hero-visual">
+                <div class="hero-card">
+                    <div
+                        style="font-size:13px;font-weight:600;margin-bottom:12px;display:flex;align-items:center;gap:6px">
+                        <span style="color:var(--accent)">●</span> pawbot status</div>
+                    <div class="hc-row">
+                        <div class="hc-dot" style="background:#22c55e"></div><span class="hc-label">Version</span><span
+                            class="hc-value">0.1.4.post3</span>
+                    </div>
+                    <div class="hc-row">
+                        <div class="hc-dot" style="background:#22c55e"></div><span class="hc-label">Model</span><span
+                            class="hc-value">anthropic/claude-sonnet-4-5</span>
+                    </div>
+                    <div class="hc-row">
+                        <div class="hc-dot" style="background:#22c55e"></div><span class="hc-label">Provider</span><span
+                            class="hc-value">openrouter ✓</span>
+                    </div>
+                    <div class="hc-row">
+                        <div class="hc-dot" style="background:#22c55e"></div><span class="hc-label">Channels</span><span
+                            class="hc-value">telegram, discord</span>
+                    </div>
+                    <div class="hc-row">
+                        <div class="hc-dot" style="background:#22c55e"></div><span class="hc-label">Gateway</span><span
+                            class="hc-value">:18790 running</span>
+                    </div>
+                    <div class="hc-row">
+                        <div class="hc-dot" style="background:var(--warm3)"></div><span
+                            class="hc-label">Cron</span><span class="hc-value">3 jobs active</span>
+                    </div>
+                    <div class="hc-row">
+                        <div class="hc-dot" style="background:var(--warm3)"></div><span
+                            class="hc-label">Heartbeat</span><span class="hc-value">every 30m</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="stats">
+        <div class="stats-inner">
+            <div class="st">
+                <div class="st-num">~4K</div>
+                <div class="st-lbl">Lines of Code</div>
+            </div>
+            <div class="st">
+                <div class="st-num">16</div>
+                <div class="st-lbl">LLM Providers</div>
+            </div>
+            <div class="st">
+                <div class="st-num">10</div>
+                <div class="st-lbl">Chat Channels</div>
+            </div>
+            <div class="st">
+                <div class="st-num">8</div>
+                <div class="st-lbl">Built-in Skills</div>
+            </div>
+        </div>
+    </div>
+
+    <section class="sec-warm" id="features">
+        <div class="container">
+            <div class="sec-label">Capabilities</div>
+            <div class="sec-title">Built for personal use,<br>not enterprise bloat.</div>
+            <p class="sec-desc">Every feature exists because it's useful. Every line of code earns its place.</p>
+            <div class="feat-grid">
+                <div class="feat">
+                    <div class="feat-icon">🤖</div>
+                    <h3>16 LLM Providers</h3>
+                    <p>OpenRouter, Anthropic, OpenAI, DeepSeek, Gemini, Groq, MiniMax, Moonshot, Zhipu, DashScope, vLLM,
+                        GitHub Copilot, and more. Switch models with one config line.</p>
+                </div>
+                <div class="feat">
+                    <div class="feat-icon">💬</div>
+                    <h3>10 Chat Channels</h3>
+                    <p>Telegram, Discord, WhatsApp, Slack, Email, Matrix, Feishu, DingTalk, QQ, and Mochat. Talk to your
+                        agent from anywhere.</p>
+                </div>
+                <div class="feat">
+                    <div class="feat-icon">🔧</div>
+                    <h3>MCP Tool Servers</h3>
+                    <p>Connect any MCP server — stdio or HTTP transport. Auto-discovers tools on startup. Compatible
+                        with Claude Desktop and Cursor configs.</p>
+                </div>
+                <div class="feat">
+                    <div class="feat-icon">🧠</div>
+                    <h3>Memory & Context</h3>
+                    <p>SQLite fact store with vector embeddings, RAG retrieval, salience-based decay, and context budget
+                        enforcement. Remembers across sessions.</p>
+                </div>
+                <div class="feat">
+                    <div class="feat-icon">🎯</div>
+                    <h3>Skills System</h3>
+                    <p>8 built-in skills: clawhub, cron, github, memory, skill-creator, summarize, tmux, weather.
+                        Auto-creates new skills from novel tasks.</p>
+                </div>
+                <div class="feat">
+                    <div class="feat-icon">👥</div>
+                    <h3>Subagent Pool</h3>
+                    <p>Parallel background execution with configurable concurrency, token budgets, time limits, and
+                        inbox review after each subgoal.</p>
+                </div>
+                <div class="feat">
+                    <div class="feat-icon">⏰</div>
+                    <h3>Scheduling</h3>
+                    <p>Cron scheduler with expressions and intervals. Heartbeat engine for proactive trigger-driven
+                        wake-ups every N minutes.</p>
+                </div>
+                <div class="feat">
+                    <div class="feat-icon">🛡️</div>
+                    <h3>Security Layer</h3>
+                    <p>Command sandboxing, prompt injection detection, audit logging, workspace restrictions, and
+                        confirmation gates for dangerous operations.</p>
+                </div>
+                <div class="feat">
+                    <div class="feat-icon">📡</div>
+                    <h3>Observability</h3>
+                    <p>OpenTelemetry tracing to file or OTLP endpoint, Prometheus metrics port, configurable privacy
+                        controls for tool args and memory.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="providers">
+        <div class="container">
+            <div class="sec-label">Providers</div>
+            <div class="sec-title">Every major LLM, one config away.</div>
+            <p class="sec-desc">16 providers from the registry. Gateways, direct APIs, OAuth, and local deployments.</p>
+            <div class="chip-grid">
+                <div class="chip">OpenRouter</div>
+                <div class="chip">Anthropic</div>
+                <div class="chip">OpenAI</div>
+                <div class="chip">DeepSeek</div>
+                <div class="chip">Gemini</div>
+                <div class="chip">Groq</div>
+                <div class="chip">MiniMax</div>
+                <div class="chip">Moonshot</div>
+                <div class="chip">Zhipu AI</div>
+                <div class="chip">DashScope</div>
+                <div class="chip">AiHubMix</div>
+                <div class="chip">SiliconFlow</div>
+                <div class="chip">VolcEngine</div>
+                <div class="chip">vLLM / Local</div>
+                <div class="chip">OpenAI Codex</div>
+                <div class="chip">GitHub Copilot</div>
+            </div>
+        </div>
+    </section>
+
+    <section class="sec-warm" id="channels">
+        <div class="container">
+            <div class="sec-label">Channels</div>
+            <div class="sec-title">Your AI, everywhere you chat.</div>
+            <p class="sec-desc">Each channel has its own config block. Enable what you need — credentials stay local.
+            </p>
+            <div class="chip-grid">
+                <div class="chip">✈️ Telegram</div>
+                <div class="chip">🎮 Discord</div>
+                <div class="chip">📱 WhatsApp</div>
+                <div class="chip">💼 Slack</div>
+                <div class="chip">📧 Email</div>
+                <div class="chip">🔗 Matrix</div>
+                <div class="chip">🐦 Feishu / Lark</div>
+                <div class="chip">📌 DingTalk</div>
+                <div class="chip">🐧 QQ</div>
+                <div class="chip">🐾 Mochat</div>
+            </div>
+        </div>
+    </section>
+
+    <section>
+        <div class="container">
+            <div class="sec-label">Quick Start</div>
+            <div class="sec-title">Up and running in 2 minutes.</div>
+            <div class="code" style="max-width:600px"><button onclick="copyCode(this)">Copy</button><span class="cmt">#
+                    Install</span>
+                pip install pawbot-ai
+
+                <span class="cmt"># Interactive setup (API key + model)</span>
+                pawbot onboard --setup
+
+                <span class="cmt"># Chat</span>
+                pawbot agent -m "Hello!"
+
+                <span class="cmt"># Start gateway for Telegram/WhatsApp</span>
+                pawbot gateway
+            </div>
+            <div style="margin-top:20px;display:flex;gap:12px;flex-wrap:wrap">
+                <a href="install.html" class="btn btn-primary">Full Install Guide →</a>
+                <a href="docs.html" class="btn btn-ghost">Configuration Reference →</a>
+            </div>
+        </div>
+    </section>
+
+    <section class="cta sec-warm">
+        <div class="container">
+            <div class="cta-box">
+                <h2>Ready to start?</h2>
+                <p>One command. Under 2 minutes. No account required.</p>
+                <a href="install.html" class="btn btn-primary">Installation Guide →</a>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <p>🐾 Pawbot v0.1.4.post3 · MIT License · <a href="https://github.com/HKUDS/pawbot">GitHub</a> · <a
+                href="https://github.com/HKUDS/pawbot/issues">Issues</a> · <a href="docs.html">Docs</a></p>
+    </footer>
+
+    <script>
+        window.addEventListener('scroll', () => document.getElementById('navbar').classList.toggle('scrolled', scrollY > 40));
+        function copyText(b, t) { navigator.clipboard.writeText(t); b.textContent = 'Copied!'; setTimeout(() => b.textContent = 'Copy', 1500) }
+        function copyCode(b) { const t = b.parentElement.textContent.replace(/Copy|Copied!/g, '').trim(); navigator.clipboard.writeText(t); b.textContent = 'Copied!'; setTimeout(() => b.textContent = 'Copy', 1500) }
+        document.querySelectorAll('.nav-links a').forEach(a => a.addEventListener('click', () => document.querySelector('.nav-links').classList.remove('show')));
+    </script>
+</body>
+
+</html>

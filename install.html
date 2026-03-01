@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Install Pawbot — Complete Installation Guide</title>
+    <meta name="description"
+        content="6 ways to install Pawbot. Step-by-step guide for pip, curl, uv, git clone, Docker, and manual setup.">
+    <link
+        href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box
+        }
+
+        :root {
+            --bg: #fafaf8;
+            --surface: #fff;
+            --border: #e8e5e0;
+            --text: #1a1815;
+            --dim: #8a8578;
+            --accent: #e87537;
+            --accent2: #d45d20;
+            --warm: #f5f0e8;
+            --warm2: #ede6d8;
+            --warm3: #c4a882;
+            --mono: 'DM Mono', monospace;
+            --font: 'DM Sans', system-ui, sans-serif;
+            --radius: 12px;
+            --shadow: 0 1px 3px rgba(0, 0, 0, .04), 0 4px 12px rgba(0, 0, 0, .03)
+        }
+
+        html {
+            scroll-behavior: smooth
+        }
+
+        body {
+            font-family: var(--font);
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.7;
+            -webkit-font-smoothing: antialiased
+        }
+
+        a {
+            color: var(--accent);
+            text-decoration: none
+        }
+
+        a:hover {
+            text-decoration: underline
+        }
+
+        nav {
+            position: fixed;
+            top: 0;
+            width: 100%;
+            z-index: 100;
+            background: rgba(250, 250, 248, .92);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border)
+        }
+
+        .nav-inner {
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: 14px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center
+        }
+
+        .nav-logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 700;
+            font-size: 17px;
+            color: var(--text);
+            text-decoration: none
+        }
+
+        .nav-logo .paw {
+            width: 30px;
+            height: 30px;
+            background: var(--accent);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            color: #fff
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 24px;
+            align-items: center
+        }
+
+        .nav-links a {
+            color: var(--dim);
+            font-size: 14px;
+            font-weight: 500;
+            text-decoration: none;
+            transition: color .2s
+        }
+
+        .nav-links a:hover {
+            color: var(--text);
+            text-decoration: none
+        }
+
+        .nav-links a.active {
+            color: var(--accent)
+        }
+
+        .btn-nav {
+            background: var(--accent) !important;
+            color: #fff !important;
+            padding: 7px 18px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600
+        }
+
+        .mobile-nav {
+            display: none;
+            background: none;
+            border: none;
+            font-size: 22px;
+            cursor: pointer;
+            color: var(--text)
+        }
+
+        .page-header {
+            padding: 100px 24px 48px;
+            max-width: 800px;
+            margin: 0 auto
+        }
+
+        .page-header h1 {
+            font-size: clamp(28px, 5vw, 40px);
+            font-weight: 700;
+            margin-bottom: 10px
+        }
+
+        .page-header p {
+            color: var(--dim);
+            font-size: 16px;
+            max-width: 560px
+        }
+
+        .content {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 0 24px 80px
+        }
+
+        .content h2 {
+            font-size: 22px;
+            font-weight: 700;
+            margin: 48px 0 12px;
+            padding-top: 24px;
+            border-top: 1px solid var(--border)
+        }
+
+        .content h2:first-of-type {
+            border-top: none;
+            margin-top: 0;
+            padding-top: 0
+        }
+
+        .content h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin: 24px 0 8px
+        }
+
+        .content p {
+            margin-bottom: 12px;
+            color: var(--text);
+            font-size: 15px
+        }
+
+        .content ul,
+        .content ol {
+            margin: 8px 0 16px 20px;
+            font-size: 15px
+        }
+
+        .content li {
+            margin-bottom: 6px
+        }
+
+        .content strong {
+            font-weight: 600
+        }
+
+        .code {
+            background: var(--warm);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px 20px;
+            font-family: var(--mono);
+            font-size: 13px;
+            color: var(--text);
+            overflow-x: auto;
+            position: relative;
+            line-height: 1.7;
+            margin: 12px 0 20px
+        }
+
+        .code .cmt {
+            color: var(--dim)
+        }
+
+        .code button {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--dim);
+            border-radius: 6px;
+            padding: 3px 10px;
+            font-size: 11px;
+            cursor: pointer;
+            font-family: var(--font);
+            transition: all .2s
+        }
+
+        .code button:hover {
+            color: var(--accent);
+            border-color: var(--accent)
+        }
+
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px;
+            margin: 16px 0;
+            box-shadow: var(--shadow)
+        }
+
+        .card h3 {
+            margin: 0 0 6px
+        }
+
+        .card p {
+            color: var(--dim);
+            font-size: 13px;
+            margin-bottom: 10px
+        }
+
+        .badge {
+            display: inline-block;
+            background: var(--warm);
+            color: var(--accent);
+            font-size: 11px;
+            font-weight: 600;
+            padding: 3px 10px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            letter-spacing: .5px
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16px 0;
+            font-size: 14px
+        }
+
+        th {
+            text-align: left;
+            padding: 10px 12px;
+            font-size: 12px;
+            color: var(--dim);
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            border-bottom: 2px solid var(--border)
+        }
+
+        td {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border)
+        }
+
+        tr:hover {
+            background: rgba(232, 117, 55, .02)
+        }
+
+        .note {
+            background: var(--warm);
+            border-left: 3px solid var(--accent);
+            border-radius: 0 8px 8px 0;
+            padding: 14px 18px;
+            margin: 16px 0;
+            font-size: 14px;
+            color: var(--text)
+        }
+
+        .note strong {
+            color: var(--accent)
+        }
+
+        .toc {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px 24px;
+            margin: 0 0 36px;
+            box-shadow: var(--shadow)
+        }
+
+        .toc h3 {
+            font-size: 14px;
+            font-weight: 600;
+            margin: 0 0 10px;
+            color: var(--dim);
+            text-transform: uppercase;
+            letter-spacing: 1px
+        }
+
+        .toc ol {
+            margin: 0;
+            padding-left: 20px;
+            font-size: 14px
+        }
+
+        .toc li {
+            margin-bottom: 4px
+        }
+
+        .toc a {
+            text-decoration: none;
+            color: var(--text)
+        }
+
+        .toc a:hover {
+            color: var(--accent)
+        }
+
+        footer {
+            padding: 36px 24px;
+            text-align: center;
+            border-top: 1px solid var(--border)
+        }
+
+        footer p {
+            font-size: 13px;
+            color: var(--dim)
+        }
+
+        footer a {
+            color: var(--dim);
+            text-decoration: none
+        }
+
+        footer a:hover {
+            color: var(--accent)
+        }
+
+        @media(max-width:768px) {
+            .nav-links {
+                display: none
+            }
+
+            .mobile-nav {
+                display: block
+            }
+        }
+
+        .nav-links.show {
+            display: flex !important;
+            position: fixed;
+            top: 56px;
+            left: 0;
+            right: 0;
+            background: rgba(250, 250, 248, .97);
+            backdrop-filter: blur(16px);
+            flex-direction: column;
+            padding: 16px 24px;
+            gap: 12px;
+            border-bottom: 1px solid var(--border)
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px)
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0)
+            }
+        }
+
+        .content {
+            animation: fadeIn .5s ease
+        }
+    </style>
+</head>
+
+<body>
+    <nav>
+        <div class="nav-inner">
+            <a href="index.html" class="nav-logo">
+                <div class="paw">🐾</div>Pawbot
+            </a>
+            <div class="nav-links">
+                <a href="index.html">Home</a>
+                <a href="install.html" class="active">Install</a>
+                <a href="docs.html">Docs</a>
+                <a href="https://github.com/HKUDS/pawbot" target="_blank" class="btn-nav">GitHub</a>
+            </div>
+            <button class="mobile-nav"
+                onclick="document.querySelector('.nav-links').classList.toggle('show')">☰</button>
+        </div>
+    </nav>
+
+    <div class="page-header">
+        <h1>Installation Guide</h1>
+        <p>Everything you need to install, configure, and start using Pawbot. Pick any method — they all produce the
+            same result.</p>
+    </div>
+
+    <div class="content">
+        <div class="toc">
+            <h3>Contents</h3>
+            <ol>
+                <li><a href="#prereqs">Prerequisites</a></li>
+                <li><a href="#install">Install Methods</a></li>
+                <li><a href="#setup">First-Time Setup</a></li>
+                <li><a href="#verify">Verify It Works</a></li>
+                <li><a href="#telegram">Connect Telegram</a></li>
+                <li><a href="#whatsapp">Connect WhatsApp</a></li>
+                <li><a href="#cron">Scheduled Tasks</a></li>
+                <li><a href="#config">Config Reference</a></li>
+                <li><a href="#upgrade">Upgrading</a></li>
+                <li><a href="#uninstall">Uninstall</a></li>
+                <li><a href="#troubleshooting">Troubleshooting</a></li>
+            </ol>
+        </div>
+
+        <!-- 1. Prerequisites -->
+        <h2 id="prereqs">1. Prerequisites</h2>
+        <p>You need <strong>two things</strong> before installing:</p>
+
+        <h3>Python 3.11+</h3>
+        <div class="code"><button onclick="copyCode(this)">Copy</button>python3 --version</div>
+        <p>If the output shows 3.10 or lower, upgrade:</p>
+        <table>
+            <tr>
+                <td><strong>macOS</strong></td>
+                <td><code>brew install python@3.12</code></td>
+            </tr>
+            <tr>
+                <td><strong>Ubuntu / Debian</strong></td>
+                <td><code>sudo apt install python3.12 python3.12-venv</code></td>
+            </tr>
+            <tr>
+                <td><strong>Windows</strong></td>
+                <td>Download from <a href="https://python.org/downloads">python.org</a> — tick "Add to PATH"</td>
+            </tr>
+            <tr>
+                <td><strong>Any system</strong></td>
+                <td><code>curl https://pyenv.run | bash && pyenv install 3.12</code></td>
+            </tr>
+        </table>
+
+        <h3>An LLM API Key</h3>
+        <p><strong>OpenRouter</strong> (recommended) — one key gives access to Claude, GPT-4, Gemini, DeepSeek, and
+            more. Free tier available.<br>
+            <a href="https://openrouter.ai/keys">→ Get a key at openrouter.ai/keys</a>
+        </p>
+        <p>You can also use <a href="https://console.anthropic.com/keys">Anthropic</a>, <a
+                href="https://platform.openai.com/api-keys">OpenAI</a>, or <a
+                href="https://platform.deepseek.com">DeepSeek</a> directly. The setup wizard will ask.</p>
+
+        <!-- 2. Install -->
+        <h2 id="install">2. Install Methods</h2>
+
+        <div class="card">
+            <h3>⭐ Method 1 — One-liner from website</h3>
+            <p>Fastest. Checks Python, installs Pawbot, runs interactive setup.</p>
+            <div class="code"><button onclick="copyCode(this)">Copy</button>curl -fsSL
+                https://pawbot.thecloso.com/install | bash</div>
+        </div>
+
+        <div class="card">
+            <h3>Method 2 — One-liner from GitHub</h3>
+            <p>Same script, served directly from the repo. Always latest.</p>
+            <div class="code"><button onclick="copyCode(this)">Copy</button>curl -fsSL
+                https://raw.githubusercontent.com/HKUDS/pawbot/main/install/setup.sh | bash</div>
+        </div>
+
+        <div class="card">
+            <h3>Method 3 — pip</h3>
+            <p>Standard PyPI install. Run onboard separately.</p>
+            <div class="code"><button onclick="copyCode(this)">Copy</button>pip install pawbot-ai
+                pawbot onboard --setup</div>
+            <p style="font-size:13px;color:var(--dim)">Permission denied? Use <code>pip install --user pawbot-ai</code>
+            </p>
+        </div>
+
+        <div class="card">
+            <h3>Method 4 — uv (isolated environment)</h3>
+            <p>Modern Python package manager. Zero conflicts with other projects.</p>
+            <div class="code"><button onclick="copyCode(this)">Copy</button>pip install uv
+                uv tool install pawbot-ai
+                pawbot onboard --setup</div>
+        </div>
+
+        <div class="card">
+            <h3>Method 5 — Clone & inspect</h3>
+            <p>Read the code first. Also installs in dev mode for contributors.</p>
+            <div class="code"><button onclick="copyCode(this)">Copy</button>git clone
+                https://github.com/HKUDS/pawbot.git
+                cat pawbot/install/setup.sh <span class="cmt"># review</span>
+                bash pawbot/install/setup.sh</div>
+        </div>
+
+        <div class="card">
+            <h3>Method 6 — Docker</h3>
+            <p>Containerized deployment with Docker Compose.</p>
+            <div class="code"><button onclick="copyCode(this)">Copy</button><span class="cmt"># First-time setup</span>
+                docker compose run --rm pawbot-cli onboard
+
+                <span class="cmt"># Start gateway</span>
+                docker compose up -d pawbot-gateway
+
+                <span class="cmt"># Send a message</span>
+                docker compose run --rm pawbot-cli agent -m "Hello!"
+            </div>
+        </div>
+
+        <h3>Confirm the install</h3>
+        <div class="code"><button onclick="copyCode(this)">Copy</button>pawbot --version</div>
+        <p>You should see <code>pawbot 0.1.4.post3</code>. If you get "command not found", see <a
+                href="#troubleshooting">Troubleshooting</a>.</p>
+
+        <!-- 3. Setup -->
+        <h2 id="setup">3. First-Time Setup</h2>
+        <p>The interactive wizard creates your workspace, config, and asks for your API key:</p>
+        <div class="code"><button onclick="copyCode(this)">Copy</button>pawbot onboard --setup</div>
+        <p><strong>What it creates:</strong></p>
+        <ul>
+            <li><code>~/.pawbot/</code> — your data directory</li>
+            <li><code>~/.pawbot/config.json</code> — settings file</li>
+            <li><code>~/.pawbot/workspace/</code> — agent workspace with SOUL.md, USER.md, MEMORY.md</li>
+        </ul>
+
+        <h3>Or configure manually</h3>
+        <p>Run <code>pawbot onboard</code> (without <code>--setup</code>), then edit the config:</p>
+        <div class="code"><button onclick="copyCode(this)">Copy</button><span class="cmt"># macOS / Linux</span>
+            nano ~/.pawbot/config.json
+
+            <span class="cmt"># Windows</span>
+            notepad %USERPROFILE%\.pawbot\config.json
+        </div>
+
+        <p>Minimal config — replace the placeholder with your real key:</p>
+        <div class="code"><button onclick="copyCode(this)">Copy</button>{
+            "providers": {
+            "openrouter": {
+            "apiKey": "sk-or-v1-your-key-here"
+            }
+            },
+            "agents": {
+            "defaults": {
+            "model": "anthropic/claude-sonnet-4-5"
+            }
+            }
+            }</div>
+
+        <div class="note"><strong>Tip:</strong> You can also use an environment variable instead of editing the
+            file:<br><code>export PAWBOT_PROVIDERS__OPENROUTER__API_KEY="sk-or-your-key"</code></div>
+
+        <!-- 4. Verify -->
+        <h2 id="verify">4. Verify It Works</h2>
+        <div class="code"><button onclick="copyCode(this)">Copy</button>pawbot agent -m "Say hello!"</div>
+        <p>You should see a response from the AI within a few seconds. If you do — <strong>Pawbot is fully installed and
+                working</strong>.</p>
+
+        <!-- 5. Telegram -->
+        <h2 id="telegram">5. Connect Telegram</h2>
+        <p>Setup takes about 3 minutes.</p>
+        <ol>
+            <li>Message <code>@BotFather</code> on Telegram → send <code>/newbot</code> → copy the bot token</li>
+            <li>Message <code>@userinfobot</code> → copy your numeric user ID</li>
+            <li>Add to <code>~/.pawbot/config.json</code>:</li>
+        </ol>
+        <div class="code"><button onclick="copyCode(this)">Copy</button>"channels": {
+            "telegram": {
+            "enabled": true,
+            "token": "7123456789:AAHdq...",
+            "allowFrom": ["123456789"]
+            }
+            }</div>
+        <ol start="4">
+            <li>Start the gateway: <code>pawbot gateway</code></li>
+        </ol>
+        <div class="note"><strong>Security:</strong> <code>allowFrom</code> restricts who can message your bot. Only
+            listed user IDs are allowed.</div>
+
+        <p>Keep it running in the background:</p>
+        <div class="code"><button onclick="copyCode(this)">Copy</button>nohup pawbot gateway >
+            ~/.pawbot/logs/gateway.log 2>&1 &</div>
+
+        <!-- 6. WhatsApp -->
+        <h2 id="whatsapp">6. Connect WhatsApp</h2>
+        <div class="note"><strong>Prerequisite:</strong> Node.js 18+ required. Check: <code>node --version</code></div>
+        <p>WhatsApp needs two terminals running simultaneously:</p>
+
+        <h3>Terminal 1 — Link your account</h3>
+        <div class="code"><button onclick="copyCode(this)">Copy</button>pawbot channels login</div>
+        <p>A QR code appears. On your phone: WhatsApp → ⋮ → Linked Devices → Link a Device → scan the QR. Keep this
+            terminal open.</p>
+
+        <h3>Terminal 2 — Start the gateway</h3>
+        <div class="code"><button onclick="copyCode(this)">Copy</button>pawbot gateway</div>
+        <p>Add your phone number to config (international format with +):</p>
+        <div class="code"><button onclick="copyCode(this)">Copy</button>"channels": {
+            "whatsapp": {
+            "enabled": true,
+            "allowFrom": ["+1234567890"]
+            }
+            }</div>
+
+        <!-- 7. Cron -->
+        <h2 id="cron">7. Scheduled Tasks</h2>
+        <div class="code"><button onclick="copyCode(this)">Copy</button><span class="cmt"># Every morning at 9am</span>
+            pawbot cron add --name "morning" --message "Good morning!" --cron "0 9 * * *"
+
+            <span class="cmt"># Every hour</span>
+            pawbot cron add --name "hourly" --message "Check status" --every 3600
+
+            <span class="cmt"># Every Monday at 8am</span>
+            pawbot cron add --name "weekly" --message "Weekly summary" --cron "0 8 * * 1"
+
+            <span class="cmt"># List / remove</span>
+            pawbot cron list
+            pawbot cron remove &lt;job_id&gt;
+        </div>
+
+        <h3>Cron expressions</h3>
+        <table>
+            <tr>
+                <td><code>0 9 * * *</code></td>
+                <td>Every day at 9:00 AM</td>
+            </tr>
+            <tr>
+                <td><code>0 8 * * 1</code></td>
+                <td>Every Monday at 8:00 AM</td>
+            </tr>
+            <tr>
+                <td><code>*/30 * * * *</code></td>
+                <td>Every 30 minutes</td>
+            </tr>
+            <tr>
+                <td><code>0 0 * * *</code></td>
+                <td>Every day at midnight</td>
+            </tr>
+            <tr>
+                <td><code>0 9,17 * * *</code></td>
+                <td>9 AM and 5 PM daily</td>
+            </tr>
+        </table>
+
+        <!-- 8. Config -->
+        <h2 id="config">8. Config Reference</h2>
+        <p>Full <code>~/.pawbot/config.json</code> example:</p>
+        <div class="code"><button onclick="copyCode(this)">Copy</button>{
+            "agents": {
+            "defaults": {
+            "model": "anthropic/claude-sonnet-4-5",
+            "provider": "auto",
+            "maxTokens": 8192,
+            "temperature": 0.1,
+            "maxToolIterations": 40,
+            "memoryWindow": 100
+            }
+            },
+            "providers": {
+            "openrouter": { "apiKey": "sk-or-v1-..." }
+            },
+            "channels": {
+            "telegram": {
+            "enabled": true,
+            "token": "BOT_TOKEN",
+            "allowFrom": ["USER_ID"]
+            }
+            },
+            "tools": {
+            "web": { "search": { "apiKey": "BSA-..." } },
+            "exec": { "timeout": 60 },
+            "restrictToWorkspace": false
+            }
+            }</div>
+
+        <h3>Common model choices</h3>
+        <table>
+            <tr>
+                <th>Model</th>
+                <th>Provider</th>
+                <th>Notes</th>
+            </tr>
+            <tr>
+                <td><code>anthropic/claude-sonnet-4-5</code></td>
+                <td>OpenRouter</td>
+                <td>Best balance of speed & quality</td>
+            </tr>
+            <tr>
+                <td><code>anthropic/claude-opus-4-5</code></td>
+                <td>OpenRouter</td>
+                <td>Most capable, slower</td>
+            </tr>
+            <tr>
+                <td><code>anthropic/claude-haiku-4-5</code></td>
+                <td>OpenRouter</td>
+                <td>Fastest, cheapest</td>
+            </tr>
+            <tr>
+                <td><code>deepseek-chat</code></td>
+                <td>DeepSeek</td>
+                <td>Very capable, low cost</td>
+            </tr>
+            <tr>
+                <td><code>openai/gpt-4o</code></td>
+                <td>OpenRouter</td>
+                <td>GPT-4o via OpenRouter</td>
+            </tr>
+            <tr>
+                <td><code>gemini-2.0-flash</code></td>
+                <td>Gemini</td>
+                <td>Google Gemini direct</td>
+            </tr>
+        </table>
+
+        <!-- 9. Upgrade -->
+        <h2 id="upgrade">9. Upgrading</h2>
+        <div class="code"><button onclick="copyCode(this)">Copy</button><span class="cmt"># pip</span>
+            pip install --upgrade pawbot-ai
+
+            <span class="cmt"># uv</span>
+            uv tool upgrade pawbot-ai
+
+            <span class="cmt"># cloned repo</span>
+            cd ~/pawbot && git pull && pip install -e .
+
+            <span class="cmt"># or re-run the installer (safe — detects existing install)</span>
+            curl -fsSL https://pawbot.thecloso.com/install | bash
+        </div>
+        <p>Your <code>~/.pawbot/config.json</code> and data are never touched during upgrades.</p>
+
+        <!-- 10. Uninstall -->
+        <h2 id="uninstall">10. Uninstall</h2>
+        <div class="code"><button onclick="copyCode(this)">Copy</button><span class="cmt"># Remove the command</span>
+            pip uninstall pawbot-ai <span class="cmt"># or: uv tool uninstall pawbot-ai</span>
+
+            <span class="cmt"># Remove personal data (config, memory, workspace)</span>
+            rm -rf ~/.pawbot
+        </div>
+        <div class="note"><strong>Backup first:</strong> Your conversations and memory live in <code>~/.pawbot/</code>.
+        </div>
+
+        <!-- 11. Troubleshooting -->
+        <h2 id="troubleshooting">11. Troubleshooting</h2>
+
+        <h3><code>pawbot: command not found</code></h3>
+        <div class="code"><button onclick="copyCode(this)">Copy</button>pip show pawbot-ai | grep Location
+
+            <span class="cmt"># Add to PATH (pip --user installs)</span>
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+            source ~/.bashrc
+        </div>
+
+        <h3>API key error / authentication failed</h3>
+        <p>Check <code>~/.pawbot/config.json</code>. The key must start with <code>sk-or-</code> (OpenRouter),
+            <code>sk-ant-</code> (Anthropic), or <code>sk-</code> (OpenAI). Must not contain <code>xxx</code> or
+            <code>YOUR_</code>.</p>
+
+        <h3>WhatsApp QR code expires</h3>
+        <p>It refreshes every 20 seconds. Press Ctrl+C and run <code>pawbot channels login</code> again.</p>
+
+        <h3>Telegram bot not responding</h3>
+        <ol>
+            <li>Check gateway is running: <code>pawbot status</code></li>
+            <li>Confirm your user ID is in <code>allowFrom</code> — must be a <strong>number</strong>, not username</li>
+            <li>Make sure the bot token matches exactly what BotFather gave you</li>
+        </ol>
+
+        <h3>Config file broken (JSON syntax error)</h3>
+        <div class="code"><button onclick="copyCode(this)">Copy</button><span class="cmt"># Validate</span>
+            python3 -c "import json; json.load(open('$HOME/.pawbot/config.json')); print('OK')"
+
+            <span class="cmt"># Regenerate from scratch</span>
+            mv ~/.pawbot/config.json ~/.pawbot/config.json.bak
+            pawbot onboard
+        </div>
+        <p>Common mistakes: trailing comma after last item, single quotes, comments (<code>//</code>).</p>
+
+        <h3><code>ModuleNotFoundError: No module named 'pawbot'</code></h3>
+        <p>Multiple Python versions on the system. Check <code>pip --version</code> and <code>which pawbot</code> —
+            ensure they use the same Python.</p>
+    </div>
+
+    <footer>
+        <p>🐾 Pawbot v0.1.4.post3 · MIT License · <a href="https://github.com/HKUDS/pawbot">GitHub</a> · <a
+                href="https://github.com/HKUDS/pawbot/issues">Issues</a></p>
+    </footer>
+
+    <script>
+        function copyCode(b) { const t = b.parentElement.textContent.replace(/Copy|Copied!/g, '').trim(); navigator.clipboard.writeText(t); b.textContent = 'Copied!'; setTimeout(() => b.textContent = 'Copy', 1500) }
+        document.querySelectorAll('.nav-links a').forEach(a => a.addEventListener('click', () => document.querySelector('.nav-links').classList.remove('show')));
+    </script>
+</body>
+
+</html>
