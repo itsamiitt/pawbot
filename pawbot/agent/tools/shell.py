@@ -1,4 +1,4 @@
-"""Shell execution tool."""
+﻿"""Shell execution tool."""
 
 import asyncio
 import os
@@ -37,6 +37,7 @@ class ExecTool(Tool):
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
+        self.environment = os.environ.get("PAWBOT_ENV", "dev").lower()
 
     @property
     def name(self) -> str:
@@ -125,6 +126,8 @@ class ExecTool(Tool):
     def _guard_command(self, command: str, cwd: str) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""
         cmd = command.strip()
+        if self.environment in {"prod", "production"} and self._is_prod_restricted(cmd):
+            return "Error: Command blocked by production safety policy"
         lower = cmd.lower()
 
         for pattern in self.deny_patterns:
@@ -152,7 +155,24 @@ class ExecTool(Tool):
         return None
 
     @staticmethod
+    def _is_prod_restricted(command: str) -> bool:
+        lower = command.lower()
+        restricted = [
+            "git push --force",
+            "systemctl stop",
+            "systemctl disable",
+            "shutdown",
+            "reboot",
+            "diskpart",
+            "mkfs",
+            "drop database",
+        ]
+        return any(p in lower for p in restricted)
+
+    @staticmethod
     def _extract_absolute_paths(command: str) -> list[str]:
         win_paths = re.findall(r"[A-Za-z]:\\[^\s\"'|><;]+", command)   # Windows: C:\...
         posix_paths = re.findall(r"(?:^|[\s|>])(/[^\s\"'>]+)", command) # POSIX: /absolute only
         return win_paths + posix_paths
+
+

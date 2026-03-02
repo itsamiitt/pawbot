@@ -40,13 +40,6 @@ async def root():
     return "<h1>ui.html not found</h1>"
 
 
-@app.get("/{path:path}", response_class=HTMLResponse)
-async def spa_fallback(path: str):
-    if path.startswith("api/"):
-        raise HTTPException(404, "Not found")
-    if UI_FILE.exists():
-        return UI_FILE.read_text(encoding="utf-8")
-    return "<h1>ui.html not found</h1>"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -91,8 +84,11 @@ def _agent_status() -> str:
 def _channel_status(cfg: dict) -> dict:
     """Count enabled channels."""
     channels = cfg.get("channels", {})
-    enabled = sum(1 for c in channels.values() if isinstance(c, dict) and c.get("enabled"))
-    return {"enabled": enabled, "total": len(channels)}
+    # Only count sub-dicts that represent actual channel configs, not top-level
+    # scalar fields like sendProgress / sendToolHints.
+    channel_dicts = {k: v for k, v in channels.items() if isinstance(v, dict)}
+    enabled = sum(1 for c in channel_dicts.values() if c.get("enabled"))
+    return {"enabled": enabled, "total": len(channel_dicts)}
 
 
 def _count_cron_jobs() -> int:
@@ -416,25 +412,38 @@ async def list_skills():
     skills_dir = PAWBOT_HOME / "workspace" / "skills"
     builtin_dir = Path(__file__).parent.parent / "skills"
 
+    seen: dict[str, dict] = {}  # name → skill dict (workspace overrides builtin)
     for d in [builtin_dir, skills_dir]:
         if not d.exists():
             continue
         for skill_path in sorted(d.iterdir()):
             if skill_path.is_dir():
                 meta = skill_path / "SKILL.md"
+                name = skill_path.name
                 desc = ""
                 if meta.exists():
-                    lines = meta.read_text(encoding="utf-8").splitlines()
-                    for line in lines:
-                        if line.strip().startswith("description:"):
-                            desc = line.split(":", 1)[1].strip().strip('"').strip("'")
-                            break
-                skills.append({
-                    "name": skill_path.name,
-                    "description": desc,
+                    try:
+                        raw = meta.read_text(encoding="utf-8")
+                        # Parse YAML frontmatter between --- markers
+                        if raw.startswith("---"):
+                            end = raw.find("---", 3)
+                            if end != -1:
+                                fm = raw[3:end]
+                                for line in fm.splitlines():
+                                    stripped = line.strip()
+                                    if stripped.startswith("name:"):
+                                        name = stripped.split(":", 1)[1].strip().strip('"').strip("'")
+                                    elif stripped.startswith("description:"):
+                                        desc = stripped.split(":", 1)[1].strip().strip('"').strip("'")
+                    except Exception:
+                        pass
+                seen[name] = {
+                    "name": name,
+                    "description": desc[:200] if desc else "",
                     "builtin": str(d) == str(builtin_dir),
-                })
+                }
 
+    skills = list(seen.values())
     return {"skills": skills, "total": len(skills)}
 
 
@@ -529,6 +538,16 @@ async def download_log(filename: str):
     return FileResponse(str(log_path), filename=filename)
 
 
+# ── SPA fallback (MUST be last route — catch-all for frontend routing) ────────
+
+
+@app.get("/{path:path}", response_class=HTMLResponse)
+async def spa_fallback(path: str):
+    if UI_FILE.exists():
+        return UI_FILE.read_text(encoding="utf-8")
+    return "<h1>ui.html not found</h1>"
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 
@@ -551,3 +570,23 @@ def start(host: str = "127.0.0.1", port: int = 4000, open_browser: bool = True):
 
 if __name__ == "__main__":
     start()
+
+@app.get("/api/observability")
+async def observability_summary(limit: int = 500):
+    """Return trace-based SLO and reliability summary."""
+    cfg = _load_raw_config()
+    obs = cfg.get("observability", {}) if isinstance(cfg, dict) else {}
+    trace_file = obs.get("traceFile") or obs.get("trace_file") or "~/.pawbot/logs/traces.jsonl"
+
+    from pawbot.agent.telemetry import summarize_trace_file
+
+    summary = summarize_trace_file(trace_file, limit=limit)
+    return {
+        "trace_file": str(Path(trace_file).expanduser()),
+        "window_span_count": summary.get("window_span_count", 0),
+        "error_count": summary.get("error_count", 0),
+        "success_rate_pct": summary.get("success_rate_pct", 100.0),
+        "latency_p50_ms": summary.get("latency_p50_ms", 0.0),
+        "latency_p95_ms": summary.get("latency_p95_ms", 0.0),
+        "channel_delivery_success_pct": summary.get("channel_delivery_success_pct", {}),
+    }

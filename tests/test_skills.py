@@ -316,3 +316,14 @@ class TestLoRAPipeline:
         assert data["datasets"][0]["path"] == str(dataset_path)
         assert data["output_dir"] == str(out_dir)
         assert data["adapter"] == "lora"
+
+def test_skill_writer_accepts_skillsDir_alias(tmp_path: Path):
+    cfg = {"skills": {"skillsDir": str(tmp_path / "aliased-skills")}}
+    writer = SkillWriter(config=cfg)
+    writer.create_skill(
+        name="alias-check",
+        description="Alias config works",
+        steps=["step"],
+        tools_used=[],
+    )
+    assert (tmp_path / "aliased-skills" / "alias-check" / "skill.json").exists()

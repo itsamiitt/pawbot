@@ -1,8 +1,12 @@
-"""Channel manager for coordinating chat channels."""
+﻿"""Channel manager for coordinating chat channels."""
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
+import time
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -20,7 +24,7 @@ class ChannelManager:
     Responsibilities:
     - Initialize enabled channels (Telegram, WhatsApp, etc.)
     - Start/stop channels
-    - Route outbound messages
+    - Route outbound messages with retry, dedupe, and dead-lettering
     """
 
     def __init__(self, config: Config, bus: MessageBus):
@@ -28,6 +32,13 @@ class ChannelManager:
         self.bus = bus
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
+
+        # Phase 3 reliability controls
+        self._max_send_attempts = 3
+        self._base_retry_delay_s = 0.5
+        self._seen_outbound_ids: dict[str, float] = {}
+        self._seen_ttl_seconds = 3600
+        self._dead_letter_path = Path.home() / ".pawbot" / "logs" / "dead_letter.jsonl"
 
         self._init_channels()
 
@@ -162,23 +173,19 @@ class ChannelManager:
             logger.warning("No channels enabled")
             return
 
-        # Start outbound dispatcher
         self._dispatch_task = asyncio.create_task(self._dispatch_outbound())
 
-        # Start channels
         tasks = []
         for name, channel in self.channels.items():
             logger.info("Starting {} channel...", name)
             tasks.append(asyncio.create_task(self._start_channel(name, channel)))
 
-        # Wait for all to complete (they should run forever)
         await asyncio.gather(*tasks, return_exceptions=True)
 
     async def stop_all(self) -> None:
         """Stop all channels and the dispatcher."""
         logger.info("Stopping all channels...")
 
-        # Stop dispatcher
         if self._dispatch_task:
             self._dispatch_task.cancel()
             try:
@@ -186,13 +193,74 @@ class ChannelManager:
             except asyncio.CancelledError:
                 pass
 
-        # Stop all channels
         for name, channel in self.channels.items():
             try:
                 await channel.stop()
                 logger.info("Stopped {} channel", name)
             except Exception as e:
                 logger.error("Error stopping {}: {}", name, e)
+
+    def _message_id(self, msg: OutboundMessage) -> str:
+        explicit = (msg.metadata or {}).get("idempotency_key")
+        if explicit:
+            return str(explicit)
+        payload = f"{msg.channel}|{msg.chat_id}|{msg.reply_to or ''}|{msg.content}|{','.join(msg.media)}"
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _prune_seen(self) -> None:
+        now = time.time()
+        stale = [k for k, ts in self._seen_outbound_ids.items() if now - ts > self._seen_ttl_seconds]
+        for k in stale:
+            self._seen_outbound_ids.pop(k, None)
+
+    def _is_duplicate(self, message_id: str) -> bool:
+        self._prune_seen()
+        return message_id in self._seen_outbound_ids
+
+    def _mark_seen(self, message_id: str) -> None:
+        self._seen_outbound_ids[message_id] = time.time()
+
+    def _write_dead_letter(self, msg: OutboundMessage, error_text: str) -> None:
+        try:
+            self._dead_letter_path.parent.mkdir(parents=True, exist_ok=True)
+            row = {
+                "timestamp": int(time.time()),
+                "channel": msg.channel,
+                "chat_id": msg.chat_id,
+                "content": msg.content,
+                "reply_to": msg.reply_to,
+                "media": msg.media,
+                "metadata": msg.metadata,
+                "error": error_text,
+            }
+            with self._dead_letter_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        except Exception as exc:
+            logger.error("Failed writing dead-letter record: {}", exc)
+
+    async def _send_with_retry(self, channel: BaseChannel, msg: OutboundMessage) -> bool:
+        last_error: Exception | None = None
+        for attempt in range(1, self._max_send_attempts + 1):
+            try:
+                await channel.send(msg)
+                return True
+            except Exception as e:
+                last_error = e
+                if attempt < self._max_send_attempts:
+                    delay = self._base_retry_delay_s * (2 ** (attempt - 1))
+                    logger.warning(
+                        "Send attempt {}/{} failed for {}: {}. Retrying in {:.2f}s",
+                        attempt,
+                        self._max_send_attempts,
+                        msg.channel,
+                        e,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+
+        self._write_dead_letter(msg, str(last_error) if last_error else "unknown send failure")
+        logger.error("Message moved to dead-letter queue for channel {}", msg.channel)
+        return False
 
     async def _dispatch_outbound(self) -> None:
         """Dispatch outbound messages to the appropriate channel."""
@@ -212,13 +280,19 @@ class ChannelManager:
                         continue
 
                 channel = self.channels.get(msg.channel)
-                if channel:
-                    try:
-                        await channel.send(msg)
-                    except Exception as e:
-                        logger.error("Error sending to {}: {}", msg.channel, e)
-                else:
+                if not channel:
                     logger.warning("Unknown channel: {}", msg.channel)
+                    self._write_dead_letter(msg, "unknown channel")
+                    continue
+
+                message_id = self._message_id(msg)
+                if self._is_duplicate(message_id):
+                    logger.info("Skipping duplicate outbound message {}", message_id)
+                    continue
+
+                sent = await self._send_with_retry(channel, msg)
+                if sent:
+                    self._mark_seen(message_id)
 
             except asyncio.TimeoutError:
                 continue

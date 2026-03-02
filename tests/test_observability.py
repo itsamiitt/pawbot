@@ -481,3 +481,29 @@ class TestNoOpSpan:
         noop.finish(status="error", error="msg")
         assert noop.to_dict() == {}
         assert noop.duration_ms == 0.0
+
+
+def test_summarize_spans_computes_slo_metrics():
+    from pawbot.agent.telemetry import summarize_spans
+
+    spans = [
+        {"status": "ok", "duration_ms": 100, "attributes": {"channel": "telegram"}},
+        {"status": "error", "duration_ms": 500, "attributes": {"channel": "telegram"}},
+        {"status": "ok", "duration_ms": 200, "attributes": {"channel": "whatsapp"}},
+    ]
+    s = summarize_spans(spans)
+    assert s["window_span_count"] == 3
+    assert s["error_count"] == 1
+    assert s["success_rate_pct"] == 66.67
+    assert s["latency_p50_ms"] >= 100
+    assert s["latency_p95_ms"] >= 200
+    assert "telegram" in s["channel_delivery_success_pct"]
+
+
+def test_summarize_trace_file_handles_missing_file(tmp_path):
+    from pawbot.agent.telemetry import summarize_trace_file
+
+    missing = str(tmp_path / "nope.jsonl")
+    s = summarize_trace_file(missing)
+    assert s["window_span_count"] == 0
+    assert s["success_rate_pct"] == 100.0

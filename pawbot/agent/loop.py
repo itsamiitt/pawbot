@@ -44,21 +44,21 @@ SYSTEM_2_MIN = 0.7    # deliberative path
 
 SYSTEM_PATHS = {
     "system_1": {
-        "max_iterations": 5,
-        "context_mode": "minimal",      # used by context.py TaskTypeDetector
-        "model_hint": "cheap",          # passed to ModelRouter
+        "max_iterations": 20,   # raised from 5 — simple tasks still need tool calls
+        "context_mode": "minimal",
+        "model_hint": "cheap",
     },
     "system_1_5": {
-        "max_iterations": 15,
+        "max_iterations": 40,
         "context_mode": "standard",
         "model_hint": "balanced",
     },
     "system_2": {
-        "max_iterations": 50,
+        "max_iterations": 100,
         "context_mode": "full",
         "model_hint": "best",
-        "use_tree_of_thoughts": True,    # triggers ThoughtTreePlanner
-        "pre_task_reflection": True,     # triggers pre-task reflection check
+        "use_tree_of_thoughts": True,
+        "pre_task_reflection": True,
     },
 }
 
@@ -699,7 +699,7 @@ class AgentLoop:
 
         # â”€â”€ Phase 2.1: Override max_iterations from path config â”€â”€â”€â”€â”€â”€â”€
         saved_max_iterations = self.max_iterations
-        self.max_iterations = path_config.get("max_iterations", self.max_iterations)
+        self.max_iterations = max(path_config.get("max_iterations", self.max_iterations), self.max_iterations)
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):

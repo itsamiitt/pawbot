@@ -1,0 +1,8 @@
+﻿repos:
+  - repo: local
+    hooks:
+      - id: pawbot-secret-scan
+        name: pawbot secret scan
+        entry: python scripts/secret_scan.py
+        language: system
+        pass_filenames: false

@@ -1,4 +1,4 @@
-"""Skill loading, writing, execution, and LoRA pipeline utilities."""
+﻿"""Skill loading, writing, execution, and LoRA pipeline utilities."""
 
 from __future__ import annotations
 
@@ -103,7 +103,14 @@ class SkillWriter:
         skills_dir: str | os.PathLike[str] | None = None,
     ):
         self.config = _to_config_dict(config)
-        cfg_dir = self.config.get("skills", {}).get("skills_dir", self.SKILLS_DIR)
+        skills_cfg = self.config.get("skills", {}) if isinstance(self.config, dict) else {}
+        cfg_dir = (
+            skills_cfg.get("skills_dir")
+            or skills_cfg.get("skillsDir")
+            or self.config.get("skills_dir")
+            or self.config.get("skillsDir")
+            or self.SKILLS_DIR
+        )
         self.skills_dir = Path(os.path.expanduser(str(skills_dir or cfg_dir)))
         self.memory = memory_router
 
@@ -760,3 +767,5 @@ __all__ = [
     "TrainingExample",
     "LoRAPipeline",
 ]
+
+

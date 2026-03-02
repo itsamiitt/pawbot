@@ -1,0 +1,42 @@
+﻿{
+  "agents": {
+    "defaults": {
+      "workspace": "~/.pawbot/workspace",
+      "model": "openai/gpt-4o-mini",
+      "provider": "openai",
+      "max_tokens": 4096,
+      "temperature": 0.1,
+      "max_tool_iterations": 40,
+      "memory_window": 100
+    }
+  },
+  "channels": {
+    "sendProgress": true,
+    "sendToolHints": false,
+    "telegram": { "enabled": false, "token": "", "allowFrom": [] },
+    "whatsapp": { "enabled": false, "bridgeUrl": "ws://localhost:3001", "allowFrom": [] },
+    "discord": { "enabled": false, "token": "", "allowFrom": [] }
+  },
+  "providers": {
+    "openai": { "apiKey": "<REQUIRED_IN_STAGING>" }
+  },
+  "tools": {
+    "restrictToWorkspace": true,
+    "exec": {
+      "timeout": 60,
+      "pathAppend": ""
+    }
+  },
+  "security": {
+    "enabled": true,
+    "requireConfirmationForDangerous": true,
+    "blockRootExecution": true,
+    "injectionDetection": true
+  },
+  "observability": {
+    "enabled": true,
+    "traceFile": "~/.pawbot/logs/traces.jsonl",
+    "sampleRate": 1.0,
+    "prometheusPort": 0
+  }
+}

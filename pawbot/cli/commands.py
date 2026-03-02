@@ -1,4 +1,4 @@
-"""CLI commands for pawbot."""
+﻿"""CLI commands for pawbot."""
 
 import asyncio
 import os
@@ -30,7 +30,7 @@ app = typer.Typer(
 console = Console()
 EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
 
-# ── Phase 16: Register new subcommand groups ──────────────────────────
+# â”€â”€ Phase 16: Register new subcommand groups â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 from pawbot.cli.memory_commands import memory_app   # noqa: E402
 from pawbot.cli.skills_commands import skills_app     # noqa: E402
 
@@ -179,26 +179,26 @@ def onboard(
         if typer.confirm("Overwrite?"):
             config = Config()
             save_config(config)
-            console.print(f"[green]✓[/green] Config reset to defaults at {config_path}")
+            console.print(f"[green]âœ“[/green] Config reset to defaults at {config_path}")
         else:
             config = load_config()
             save_config(config)
-            console.print(f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)")
+            console.print(f"[green]âœ“[/green] Config refreshed at {config_path} (existing values preserved)")
     else:
         config = Config()
         save_config(config)
-        console.print(f"[green]✓[/green] Created config at {config_path}")
+        console.print(f"[green]âœ“[/green] Created config at {config_path}")
 
     # Create workspace
     workspace = get_workspace_path()
 
     if not workspace.exists():
         workspace.mkdir(parents=True, exist_ok=True)
-        console.print(f"[green]✓[/green] Created workspace at {workspace}")
+        console.print(f"[green]âœ“[/green] Created workspace at {workspace}")
 
     sync_workspace_templates(workspace)
 
-    # ── Interactive setup: provider, API key, model ────────────────────
+    # â”€â”€ Interactive setup: provider, API key, model â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if setup:
         import getpass
         config = load_config()
@@ -216,7 +216,7 @@ def onboard(
 
         console.print("[bold]Choose your LLM provider:[/bold]")
         for num, _, name, desc, url in providers:
-            console.print(f"  [cyan]{num}[/cyan]) {name} — {desc}")
+            console.print(f"  [cyan]{num}[/cyan]) {name} â€” {desc}")
         console.print(f"  [cyan]s[/cyan]) Skip (configure manually later)")
         console.print()
 
@@ -244,7 +244,7 @@ def onboard(
                 # Set the key on the correct provider config
                 provider_cfg = getattr(config.providers, prov_key)
                 provider_cfg.api_key = api_key
-                console.print(f"  [green]✓[/green] API key saved for {prov_name}")
+                console.print(f"  [green]âœ“[/green] API key saved for {prov_name}")
 
                 # Model selection
                 default_models = {
@@ -262,13 +262,13 @@ def onboard(
 
                 config.agents.defaults.model = model
                 config.agents.defaults.provider = prov_key
-                console.print(f"  [green]✓[/green] Model set to [cyan]{model}[/cyan]")
+                console.print(f"  [green]âœ“[/green] Model set to [cyan]{model}[/cyan]")
             else:
-                console.print("  [yellow]No key entered — you can add it later in ~/.pawbot/config.json[/yellow]")
+                console.print("  [yellow]No key entered â€” you can add it later in ~/.pawbot/config.json[/yellow]")
 
             # Save updated config
             save_config(config)
-            console.print(f"\n[green]✓[/green] Config saved to {config_path}")
+            console.print(f"\n[green]âœ“[/green] Config saved to {config_path}")
         else:
             console.print("\n[dim]Skipped. Add your API key manually to ~/.pawbot/config.json[/dim]")
 
@@ -382,6 +382,19 @@ def gateway(
     console.print(f"{__logo__} Starting pawbot gateway on port {port}...")
 
     config = load_config()
+
+    from pawbot.config.validation import summarize_issues, validate_runtime_config
+    issues = validate_runtime_config(config)
+    critical, warnings = summarize_issues(issues)
+    for item in warnings:
+        console.print(f"[yellow]WARN {item.check}: {item.message}[/yellow]")
+    if critical:
+        console.print("[red]Critical config/runtime validation failed. Refusing to start gateway.[/red]")
+        for item in critical:
+            fix = f" | fix: {item.fix}" if item.fix else ""
+            console.print(f"[red]- {item.check}: {item.message}{fix}[/red]")
+        raise typer.Exit(1)
+
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(config)
@@ -524,24 +537,24 @@ def gateway(
     )
 
     if channels.enabled_channels:
-        console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
+        console.print(f"[green]âœ“[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
     else:
         console.print("[yellow]Warning: No channels enabled[/yellow]")
 
     cron_status = cron.status()
     if cron_status["jobs"] > 0:
-        console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
+        console.print(f"[green]âœ“[/green] Cron: {cron_status['jobs']} scheduled jobs")
 
     if phase11_cron_cfg.enabled:
         console.print(
-            f"[green]✓[/green] Internal CronScheduler: every {phase11_cron_cfg.check_interval_seconds}s"
+            f"[green]âœ“[/green] Internal CronScheduler: every {phase11_cron_cfg.check_interval_seconds}s"
         )
     if heartbeat_engine is not None:
         console.print(
-            f"[green]✓[/green] HeartbeatEngine: every {phase11_hb_cfg.check_interval_minutes}m"
+            f"[green]âœ“[/green] HeartbeatEngine: every {phase11_hb_cfg.check_interval_minutes}m"
         )
 
-    console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
+    console.print(f"[green]âœ“[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
     async def run():
         try:
@@ -635,10 +648,10 @@ def agent(
             return
         if ch and not tool_hint and not ch.send_progress:
             return
-        console.print(f"  [dim]↳ {content}[/dim]")
+        console.print(f"  [dim]â†³ {content}[/dim]")
 
     if message:
-        # Single message mode — direct call, no bus needed
+        # Single message mode â€” direct call, no bus needed
         async def run_once():
             with _thinking_ctx():
                 response = await agent_loop.process_direct(message, session_id, on_progress=_cli_progress)
@@ -647,7 +660,7 @@ def agent(
 
         asyncio.run(run_once())
     else:
-        # Interactive mode — route through bus like other channels
+        # Interactive mode â€” route through bus like other channels
         from pawbot.bus.events import InboundMessage
         _init_prompt_session()
         console.print(f"{__logo__} Interactive mode (type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit)\n")
@@ -682,7 +695,7 @@ def agent(
                             elif ch and not is_tool_hint and not ch.send_progress:
                                 pass
                             else:
-                                console.print(f"  [dim]↳ {msg.content}[/dim]")
+                                console.print(f"  [dim]â†³ {msg.content}[/dim]")
                         elif not turn_done.is_set():
                             if msg.content:
                                 turn_response.append(msg.content)
@@ -768,14 +781,14 @@ def channels_status():
     wa = config.channels.whatsapp
     table.add_row(
         "WhatsApp",
-        "✓" if wa.enabled else "✗",
+        "âœ“" if wa.enabled else "âœ—",
         wa.bridge_url
     )
 
     dc = config.channels.discord
     table.add_row(
         "Discord",
-        "✓" if dc.enabled else "✗",
+        "âœ“" if dc.enabled else "âœ—",
         dc.gateway_url
     )
 
@@ -784,7 +797,7 @@ def channels_status():
     fs_config = f"app_id: {fs.app_id[:10]}..." if fs.app_id else "[dim]not configured[/dim]"
     table.add_row(
         "Feishu",
-        "✓" if fs.enabled else "✗",
+        "âœ“" if fs.enabled else "âœ—",
         fs_config
     )
 
@@ -793,7 +806,7 @@ def channels_status():
     mc_base = mc.base_url or "[dim]not configured[/dim]"
     table.add_row(
         "Mochat",
-        "✓" if mc.enabled else "✗",
+        "âœ“" if mc.enabled else "âœ—",
         mc_base
     )
 
@@ -802,7 +815,7 @@ def channels_status():
     tg_config = f"token: {tg.token[:10]}..." if tg.token else "[dim]not configured[/dim]"
     table.add_row(
         "Telegram",
-        "✓" if tg.enabled else "✗",
+        "âœ“" if tg.enabled else "âœ—",
         tg_config
     )
 
@@ -811,7 +824,7 @@ def channels_status():
     slack_config = "socket" if slack.app_token and slack.bot_token else "[dim]not configured[/dim]"
     table.add_row(
         "Slack",
-        "✓" if slack.enabled else "✗",
+        "âœ“" if slack.enabled else "âœ—",
         slack_config
     )
 
@@ -820,7 +833,7 @@ def channels_status():
     dt_config = f"client_id: {dt.client_id[:10]}..." if dt.client_id else "[dim]not configured[/dim]"
     table.add_row(
         "DingTalk",
-        "✓" if dt.enabled else "✗",
+        "âœ“" if dt.enabled else "âœ—",
         dt_config
     )
 
@@ -829,7 +842,7 @@ def channels_status():
     qq_config = f"app_id: {qq.app_id[:10]}..." if qq.app_id else "[dim]not configured[/dim]"
     table.add_row(
         "QQ",
-        "✓" if qq.enabled else "✗",
+        "âœ“" if qq.enabled else "âœ—",
         qq_config
     )
 
@@ -838,7 +851,7 @@ def channels_status():
     em_config = em.imap_host if em.imap_host else "[dim]not configured[/dim]"
     table.add_row(
         "Email",
-        "✓" if em.enabled else "✗",
+        "âœ“" if em.enabled else "âœ—",
         em_config
     )
 
@@ -893,7 +906,7 @@ def _get_bridge_dir() -> Path:
         console.print("  Building...")
         subprocess.run(["npm", "run", "build"], cwd=user_bridge, check=True, capture_output=True, timeout=120)
 
-        console.print("[green]✓[/green] Bridge ready\n")
+        console.print("[green]âœ“[/green] Bridge ready\n")
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Build failed: {e}[/red]")
         if e.stderr:
@@ -1039,7 +1052,7 @@ def cron_add(
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1) from e
 
-    console.print(f"[green]✓[/green] Added job '{job.name}' ({job.id})")
+    console.print(f"[green]âœ“[/green] Added job '{job.name}' ({job.id})")
 
 
 @cron_app.command("remove")
@@ -1054,7 +1067,7 @@ def cron_remove(
     service = CronService(store_path)
 
     if service.remove_job(job_id):
-        console.print(f"[green]✓[/green] Removed job {job_id}")
+        console.print(f"[green]âœ“[/green] Removed job {job_id}")
     else:
         console.print(f"[red]Job {job_id} not found[/red]")
 
@@ -1074,7 +1087,7 @@ def cron_enable(
     job = service.enable_job(job_id, enabled=not disable)
     if job:
         status = "disabled" if disable else "enabled"
-        console.print(f"[green]✓[/green] Job '{job.name}' {status}")
+        console.print(f"[green]âœ“[/green] Job '{job.name}' {status}")
     else:
         console.print(f"[red]Job {job_id} not found[/red]")
 
@@ -1135,7 +1148,7 @@ def cron_run(
         return await service.run_job(job_id, force=force)
 
     if asyncio.run(run()):
-        console.print("[green]✓[/green] Job executed")
+        console.print("[green]âœ“[/green] Job executed")
         if result_holder:
             _print_agent_response(result_holder[0], render_markdown=True)
     else:
@@ -1158,8 +1171,8 @@ def status():
 
     console.print(f"{__logo__} pawbot Status\n")
 
-    console.print(f"Config: {config_path} {'[green]✓[/green]' if config_path.exists() else '[red]✗[/red]'}")
-    console.print(f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}")
+    console.print(f"Config: {config_path} {'[green]âœ“[/green]' if config_path.exists() else '[red]âœ—[/red]'}")
+    console.print(f"Workspace: {workspace} {'[green]âœ“[/green]' if workspace.exists() else '[red]âœ—[/red]'}")
 
     if config_path.exists():
         from pawbot.providers.registry import PROVIDERS
@@ -1172,16 +1185,16 @@ def status():
             if p is None:
                 continue
             if spec.is_oauth:
-                console.print(f"{spec.label}: [green]✓ (OAuth)[/green]")
+                console.print(f"{spec.label}: [green]âœ“ (OAuth)[/green]")
             elif spec.is_local:
                 # Local deployments show api_base instead of api_key
                 if p.api_base:
-                    console.print(f"{spec.label}: [green]✓ {p.api_base}[/green]")
+                    console.print(f"{spec.label}: [green]âœ“ {p.api_base}[/green]")
                 else:
                     console.print(f"{spec.label}: [dim]not set[/dim]")
             else:
                 has_key = bool(p.api_key)
-                console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
+                console.print(f"{spec.label}: {'[green]âœ“[/green]' if has_key else '[dim]not set[/dim]'}")
 
 
 # ============================================================================
@@ -1241,9 +1254,9 @@ def _login_openai_codex() -> None:
                 prompt_fn=lambda s: typer.prompt(s),
             )
         if not (token and token.access):
-            console.print("[red]✗ Authentication failed[/red]")
+            console.print("[red]âœ— Authentication failed[/red]")
             raise typer.Exit(1)
-        console.print(f"[green]✓ Authenticated with OpenAI Codex[/green]  [dim]{token.account_id}[/dim]")
+        console.print(f"[green]âœ“ Authenticated with OpenAI Codex[/green]  [dim]{token.account_id}[/dim]")
     except ImportError:
         console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
         raise typer.Exit(1)
@@ -1261,18 +1274,18 @@ def _login_github_copilot() -> None:
 
     try:
         asyncio.run(_trigger())
-        console.print("[green]✓ Authenticated with GitHub Copilot[/green]")
+        console.print("[green]âœ“ Authenticated with GitHub Copilot[/green]")
     except Exception as e:
         console.print(f"[red]Authentication error: {e}[/red]")
         raise typer.Exit(1)
 
 
 # ============================================================================
-# Phase 16 — New top-level commands
+# Phase 16 â€” New top-level commands
 # ============================================================================
 
 
-# ── Subagents status ──────────────────────────────────────────────────────
+# â”€â”€ Subagents status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 subagents_app = typer.Typer(help="Manage subagents")
@@ -1289,28 +1302,29 @@ def subagents_status():
     try:
         from pawbot.config.loader import load_config
         cfg = load_config()
-        table.add_row("Enabled", "✓" if cfg.subagents.enabled else "✗")
+        table.add_row("Enabled", "âœ“" if cfg.subagents.enabled else "âœ—")
         table.add_row("Max concurrent", str(cfg.subagents.max_concurrent))
         table.add_row("Default budget (tokens)", f"{cfg.subagents.default_budget_tokens:,}")
         table.add_row("Default budget (seconds)", str(cfg.subagents.default_budget_seconds))
-        table.add_row("Inbox review", "✓" if cfg.subagents.inbox_review_after_subgoal else "✗")
+        table.add_row("Inbox review", "âœ“" if cfg.subagents.inbox_review_after_subgoal else "âœ—")
     except Exception as e:
         table.add_row("Error", str(e)[:60])
     console.print(table)
 
 
-# ── Metrics command ───────────────────────────────────────────────────────
+# â”€â”€ Metrics command â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @app.command()
 def metrics():
     """Show session metrics summary."""
-    from pawbot.agent.telemetry import PawbotTracer
+    from pawbot.agent.telemetry import PawbotTracer, summarize_trace_file
     from pawbot.config.loader import load_config
 
     config = load_config()
     tracer = PawbotTracer(config.model_dump(by_alias=False))
     summary = tracer.session_summary()
+    slo = summarize_trace_file(config.observability.trace_file, limit=500)
 
     table = Table(title="Session Metrics")
     table.add_column("Metric", style="cyan")
@@ -1320,6 +1334,9 @@ def metrics():
     table.add_row("Total tokens", f"{summary.get('total_tokens', 0):,}")
     table.add_row("Errors", str(summary.get("errors", 0)))
     table.add_row("Elapsed", f"{summary.get('session_elapsed_seconds', 0):.1f}s")
+    table.add_row("SLO success", f"{slo.get('success_rate_pct', 100):.2f}%")
+    table.add_row("SLO latency p50", f"{slo.get('latency_p50_ms', 0):.2f} ms")
+    table.add_row("SLO latency p95", f"{slo.get('latency_p95_ms', 0):.2f} ms")
 
     for tool, stats in summary.get("tool_calls", {}).items():
         table.add_row(f"Tool: {tool}", f"{stats['count']} calls")
@@ -1334,7 +1351,7 @@ def metrics():
     console.print(table)
 
 
-# ── Traces command ────────────────────────────────────────────────────────
+# â”€â”€ Traces command â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @app.command()
@@ -1386,12 +1403,12 @@ def traces(
             span.get("name", ""),
             f"[{status_color}]{status_str}[/{status_color}]",
             f"{span.get('duration_ms', 0):.1f}ms",
-            attr_preview[:40] if attr_preview else "—",
+            attr_preview[:40] if attr_preview else "â€”",
         )
     console.print(table)
 
 
-# ── Config commands ───────────────────────────────────────────────────────
+# â”€â”€ Config commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 config_app = typer.Typer(help="Configuration management")
@@ -1450,7 +1467,7 @@ def config_set(
         from pawbot.config.schema import Config
         new_config = Config.model_validate(data)
         save_config(new_config)
-        console.print(f"[green]✓ {key} = {target[final_key]}[/green]")
+        console.print(f"[green]âœ“ {key} = {target[final_key]}[/green]")
     else:
         console.print(f"[red]Key not found: {key}[/red]")
         raise typer.Exit(1)
@@ -1469,7 +1486,7 @@ def config_validate():
 
     try:
         config = load_config()
-        console.print("[green]✓ Config is valid[/green]")
+        console.print("[green]âœ“ Config is valid[/green]")
         data = config.model_dump(by_alias=False)
         t = Table(title="Config Sections")
         t.add_column("Section", style="cyan")
@@ -1481,55 +1498,68 @@ def config_validate():
                 t.add_row(section_name, "scalar")
         console.print(t)
     except Exception as e:
-        console.print(f"[red]✗ Config validation failed: {e}[/red]")
+        console.print(f"[red]âœ— Config validation failed: {e}[/red]")
         raise typer.Exit(1)
 
 
-# ── Doctor command ────────────────────────────────────────────────────────
+# â”€â”€ Doctor command â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @app.command()
 def doctor():
     """Run full system health check."""
     checks: list[tuple[str, str, str]] = []
+    critical_failures = 0
 
-    def check(name: str, fn, fix: str = ""):
+    def check(name: str, fn, fix: str = "", severity: str = "warning"):
+        nonlocal critical_failures
         try:
             result = fn()
             if result is False:
                 raise RuntimeError("check returned False")
             checks.append(("✓", name, ""))
         except Exception as e:
-            checks.append(("✗", name, fix or str(e)[:80]))
+            checks.append(("✗", name, fix or str(e)[:120]))
+            if severity == "critical":
+                critical_failures += 1
 
-    # Config file
     check(
         "Config file exists",
         lambda: os.path.exists(os.path.expanduser("~/.pawbot/config.json")),
         "Run: pawbot onboard",
+        severity="critical",
     )
 
-    # SQLite
+    from pawbot.config.loader import load_config
+    from pawbot.config.validation import summarize_issues, validate_runtime_config
+
+    config = load_config()
+    issues = validate_runtime_config(config)
+    critical, warnings = summarize_issues(issues)
+    for issue in critical:
+        checks.append(("✗", issue.check, issue.fix or issue.message))
+        critical_failures += 1
+    for issue in warnings:
+        checks.append(("✗", issue.check, issue.fix or issue.message))
+
     check(
         "SQLite database",
         lambda: os.path.exists(os.path.expanduser("~/.pawbot/memory/facts.db")),
         "Run pawbot agent -m 'test' to initialise",
     )
 
-    # ChromaDB
     check(
         "ChromaDB directory",
         lambda: os.path.exists(os.path.expanduser("~/.pawbot/memory/chroma")),
         "Run pawbot agent -m 'test' to initialise",
     )
 
-    # Ollama
     def check_ollama():
         import urllib.request
         urllib.request.urlopen("http://localhost:11434/api/tags", timeout=2)
+
     check("Ollama running", check_ollama, "Start Ollama: ollama serve")
 
-    # MCP servers
     mcp_base = Path(__file__).resolve().parent.parent
     for name in ["server_control", "deploy", "coding", "browser", "app_control"]:
         server_dir = mcp_base / "mcp-servers" / name
@@ -1539,27 +1569,34 @@ def doctor():
             f"Phase not implemented for {name}",
         )
 
-    # Security module
     def check_security():
         from pawbot.agent.security import ActionGate  # noqa: F401
+
     check("Security module", check_security, "Phase 14 not installed")
 
-    # Telemetry module
     def check_telemetry():
-        from pawbot.agent.telemetry import PawbotTracer  # noqa: F401
+        from pawbot.agent.telemetry import PawbotTracer, summarize_trace_file  # noqa: F401
+
     check("Telemetry module", check_telemetry, "Phase 15 not installed")
 
-    # Config schema validation
     def check_schema():
-        from pawbot.config.loader import load_config
         load_config()
-    check("Config schema valid", check_schema, "Run: pawbot config validate")
 
-    # Print results
+    check("Config schema valid", check_schema, "Run: pawbot config validate", severity="critical")
+
     from pawbot.cli.formatter import CLIFormatter
+
     fmt = CLIFormatter(console)
     fmt.print_doctor_results(checks)
+
+    if critical_failures > 0:
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":
     app()
+
+
+
+
+

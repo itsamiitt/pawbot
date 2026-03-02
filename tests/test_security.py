@@ -421,3 +421,15 @@ class TestMemorySanitizer:
         mem = {"id": "str-content", "salience": 0.8, "content": "plain string content"}
         result = sanitizer.sanitize_one(mem)
         assert result is not None
+
+class TestActionGateAuditCompleteness:
+
+    def test_audit_includes_caller_field(self, tmp_path):
+        log_path = str(tmp_path / "audit.jsonl")
+        audit = SecurityAuditLog(log_path=log_path)
+        gate = ActionGate(config={}, audit_log=audit)
+        gate.check("server_status", {}, caller="router")
+
+        events = audit.read_recent(1)
+        assert events
+        assert events[0].get("caller") == "router"

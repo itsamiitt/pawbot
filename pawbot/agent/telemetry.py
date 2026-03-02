@@ -499,3 +499,56 @@ class MetricsCollector:
         if self._server:
             self._server.shutdown()
             self._server = None
+
+def summarize_spans(spans: list[dict]) -> dict:
+    """Compute SLO-style metrics from exported spans."""
+    total = len(spans)
+    errors = sum(1 for s in spans if s.get("status") == "error")
+    durations = sorted(float(s.get("duration_ms", 0) or 0) for s in spans)
+
+    def pct(values: list[float], p: float) -> float:
+        if not values:
+            return 0.0
+        idx = max(0, min(len(values) - 1, int(round((p / 100.0) * (len(values) - 1)))))
+        return round(values[idx], 2)
+
+    by_channel: dict[str, dict[str, int]] = {}
+    for s in spans:
+        attrs = s.get("attributes", {}) or {}
+        ch = attrs.get("channel")
+        if not ch:
+            continue
+        row = by_channel.setdefault(ch, {"total": 0, "error": 0})
+        row["total"] += 1
+        if s.get("status") == "error":
+            row["error"] += 1
+
+    channel_delivery = {
+        ch: round(((v["total"] - v["error"]) / v["total"]) * 100, 2) if v["total"] else 100.0
+        for ch, v in by_channel.items()
+    }
+
+    success_rate = round(((total - errors) / total) * 100, 2) if total else 100.0
+
+    return {
+        "window_span_count": total,
+        "error_count": errors,
+        "success_rate_pct": success_rate,
+        "latency_p50_ms": pct(durations, 50),
+        "latency_p95_ms": pct(durations, 95),
+        "channel_delivery_success_pct": channel_delivery,
+    }
+
+
+def summarize_trace_file(trace_file: str, limit: int = 500) -> dict:
+    """Read latest spans from trace file and compute SLO summary."""
+    try:
+        path = os.path.expanduser(trace_file)
+        with open(path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        spans = [json.loads(line) for line in lines[-limit:] if line.strip()]
+    except FileNotFoundError:
+        spans = []
+    except Exception:
+        spans = []
+    return summarize_spans(spans)

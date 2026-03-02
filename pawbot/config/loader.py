@@ -7,6 +7,38 @@ from pawbot.config.schema import Config
 
 logger = logging.getLogger("pawbot.config")
 
+# ── Built-in MCP servers that ship with pawbot ──────────────────────────────
+# These are auto-registered if not already in the user's config, ensuring
+# features like screen control, browser automation, etc. always work.
+
+_BUILTIN_MCP_SERVERS = {
+    "app_control": {
+        "path": "~/.pawbot/mcp-servers/app_control/server.py",
+        "tool_timeout": 30,
+        "enabled": True,
+    },
+    "browser": {
+        "path": "~/.pawbot/mcp-servers/browser/server.py",
+        "tool_timeout": 60,
+        "enabled": True,
+    },
+    "coding": {
+        "path": "~/.pawbot/mcp-servers/coding/server.py",
+        "tool_timeout": 30,
+        "enabled": True,
+    },
+    "deploy": {
+        "path": "~/.pawbot/mcp-servers/deploy/server.py",
+        "tool_timeout": 60,
+        "enabled": True,
+    },
+    "server_control": {
+        "path": "~/.pawbot/mcp-servers/server_control/server.py",
+        "tool_timeout": 30,
+        "enabled": True,
+    },
+}
+
 
 def get_config_path() -> Path:
     """Get the default configuration file path."""
@@ -17,6 +49,36 @@ def get_data_dir() -> Path:
     """Get the pawbot data directory."""
     from pawbot.utils.helpers import get_data_path
     return get_data_path()
+
+
+def _inject_builtin_mcp_servers(config: Config) -> Config:
+    """Auto-register built-in MCP servers if not already configured.
+
+    This ensures that screen control, browser, coding, deploy, and server
+    management tools are always available without requiring manual config.
+    Only adds servers whose script files actually exist on disk.
+    """
+    import os
+
+    existing = config.tools.mcp_servers
+    added: list[str] = []
+
+    for name, defaults in _BUILTIN_MCP_SERVERS.items():
+        if name in existing:
+            continue  # User already configured this server
+
+        script_path = os.path.expanduser(defaults["path"])
+        if not os.path.isfile(script_path):
+            continue  # Script not installed — skip silently
+
+        from pawbot.config.schema import MCPServerConfig
+        existing[name] = MCPServerConfig(**defaults)
+        added.append(name)
+
+    if added:
+        logger.info("Auto-registered built-in MCP servers: %s", ", ".join(added))
+
+    return config
 
 
 def load_config(config_path: Path | None = None) -> Config:
@@ -36,11 +98,13 @@ def load_config(config_path: Path | None = None) -> Config:
 
     if not data:
         logger.warning("config.json is missing or empty — using defaults. Run: pawbot onboard")
-        return Config()
+        config = Config()
+        return _inject_builtin_mcp_servers(config)
 
     try:
         data = _migrate_config(data)
-        return Config.model_validate(data)
+        config = Config.model_validate(data)
+        return _inject_builtin_mcp_servers(config)
     except ValueError as e:
         logger.error(f"config.json validation failed: {e}. Returning defaults.")
         return Config()
