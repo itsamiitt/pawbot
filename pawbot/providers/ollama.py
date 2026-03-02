@@ -44,7 +44,7 @@ class OllamaProvider:
         try:
             r = httpx.get(f"{self.base_url}/api/tags", timeout=3.0)
             return r.status_code == 200
-        except Exception:
+        except Exception as e:  # noqa: F841
             return False
 
     def get_available_models(self) -> list[str]:

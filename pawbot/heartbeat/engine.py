@@ -183,7 +183,7 @@ class HeartbeatEngine:
             # Last scheduled slot at or before now.
             slot = int(croniter(trigger.schedule, now).get_prev(float))
             return slot if slot <= now else None
-        except Exception:
+        except Exception as e:  # noqa: F841
             return None
 
     def _fire(self, trigger: HeartbeatTrigger, _slot: int) -> None:
@@ -349,19 +349,19 @@ class HeartbeatEngine:
             }
             for tid, t in self._triggers.items()
         }
-        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        from pawbot.utils.fs import write_json_with_backup
+        write_json_with_backup(path, data)
 
     def _load_triggers(self) -> None:
+        from pawbot.utils.fs import safe_read_json
         path = Path(self.triggers_path)
-        if not path.exists():
+        data = safe_read_json(path, default={})
+        if not isinstance(data, dict):
             return
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            if not isinstance(data, dict):
-                return
-            for tid, meta in data.items():
-                if not isinstance(meta, dict):
-                    continue
+        for tid, meta in data.items():
+            if not isinstance(meta, dict):
+                continue
+            try:
                 self._triggers[str(tid)] = HeartbeatTrigger(
                     id=str(tid),
                     trigger_type=str(meta.get("trigger_type", "custom")),
@@ -374,8 +374,8 @@ class HeartbeatEngine:
                     run_count=int(meta.get("run_count", 0) or 0),
                     active=bool(meta.get("active", True)),
                 )
-        except Exception as exc:
-            logger.warning("Failed to load heartbeat triggers '{}': {}", path, exc)
+            except Exception as exc:
+                logger.warning("Failed to parse heartbeat trigger '{}': {}", tid, exc)
 
 
 class TaskWatcher:

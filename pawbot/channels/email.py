@@ -316,7 +316,7 @@ class EmailChannel(BaseChannel):
         finally:
             try:
                 client.logout()
-            except Exception:
+            except Exception as e:  # noqa: F841
                 pass
 
         return messages
@@ -350,7 +350,7 @@ class EmailChannel(BaseChannel):
             return ""
         try:
             return str(make_header(decode_header(value)))
-        except Exception:
+        except Exception as e:  # noqa: F841
             return value
 
     @classmethod
@@ -365,7 +365,7 @@ class EmailChannel(BaseChannel):
                 content_type = part.get_content_type()
                 try:
                     payload = part.get_content()
-                except Exception:
+                except Exception as e:  # noqa: F841
                     payload_bytes = part.get_payload(decode=True) or b""
                     charset = part.get_content_charset() or "utf-8"
                     payload = payload_bytes.decode(charset, errors="replace")
@@ -383,7 +383,7 @@ class EmailChannel(BaseChannel):
 
         try:
             payload = msg.get_content()
-        except Exception:
+        except Exception as e:  # noqa: F841
             payload_bytes = msg.get_payload(decode=True) or b""
             charset = msg.get_content_charset() or "utf-8"
             payload = payload_bytes.decode(charset, errors="replace")

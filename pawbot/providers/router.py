@@ -210,6 +210,17 @@ class ModelRouter:
 
     # ── Provider call methods ────────────────────────────────────────────
 
+    def _validate_key(self, provider: str, key: str) -> None:
+        """Raise ConfigError before making any network call if key is missing or placeholder."""
+        from pawbot.utils.secrets import is_placeholder
+        if not key or is_placeholder(key):
+            from pawbot.errors import ConfigError
+            raise ConfigError(
+                f"No valid API key for '{provider}'.\n"
+                f"Run: pawbot onboard --setup\n"
+                f"Or edit: ~/.pawbot/config.json → providers.{provider}.apiKey"
+            )
+
     def _call_openrouter(
         self,
         model: str,
@@ -218,29 +229,34 @@ class ModelRouter:
         messages: Optional[list[dict[str, Any]]],
     ) -> str:
         """OpenRouter uses OpenAI-compatible API."""
+        from pawbot.utils.retry import call_with_retry
+
         api_key = (
             self.config.get("providers", {})
             .get("openrouter", {})
             .get("apiKey", "")
         )
-        if not api_key:
-            raise ValueError("OpenRouter API key not set in config.json")
+        self._validate_key("openrouter", api_key)
 
         payload = {
             "model": model,
             "messages": messages or self._build_messages(system, prompt),
         }
-        r = httpx.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=120.0,
-        )
-        r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"]
+
+        def _do_call() -> str:
+            r = httpx.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=120.0,
+            )
+            r.raise_for_status()
+            return r.json()["choices"][0]["message"]["content"]
+
+        return call_with_retry(_do_call, max_retries=3, base_delay=1.0)
 
     def _call_anthropic(
         self,
@@ -250,13 +266,14 @@ class ModelRouter:
         messages: Optional[list[dict[str, Any]]],
     ) -> str:
         """Direct Anthropic API call."""
+        from pawbot.utils.retry import call_with_retry
+
         api_key = (
             self.config.get("providers", {})
             .get("anthropic", {})
             .get("apiKey", "")
         )
-        if not api_key:
-            raise ValueError("Anthropic API key not set in config.json")
+        self._validate_key("anthropic", api_key)
 
         payload: dict[str, Any] = {
             "model": model,
@@ -266,19 +283,22 @@ class ModelRouter:
         if system:
             payload["system"] = system
 
-        r = httpx.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=120.0,
-        )
-        r.raise_for_status()
-        data = r.json()
-        return data["content"][0]["text"]
+        def _do_call() -> str:
+            r = httpx.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=120.0,
+            )
+            r.raise_for_status()
+            data = r.json()
+            return data["content"][0]["text"]
+
+        return call_with_retry(_do_call, max_retries=3, base_delay=1.0)
 
     def _call_openai(
         self,
@@ -288,28 +308,32 @@ class ModelRouter:
         messages: Optional[list[dict[str, Any]]],
     ) -> str:
         """OpenAI API call."""
+        from pawbot.utils.retry import call_with_retry
+
         api_key = (
             self.config.get("providers", {})
             .get("openai", {})
             .get("apiKey", "")
         )
-        if not api_key:
-            raise ValueError("OpenAI API key not set in config.json")
+        self._validate_key("openai", api_key)
 
-        r = httpx.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model,
-                "messages": messages or self._build_messages(system, prompt),
-            },
-            timeout=120.0,
-        )
-        r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"]
+        def _do_call() -> str:
+            r = httpx.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "messages": messages or self._build_messages(system, prompt),
+                },
+                timeout=120.0,
+            )
+            r.raise_for_status()
+            return r.json()["choices"][0]["message"]["content"]
+
+        return call_with_retry(_do_call, max_retries=3, base_delay=1.0)
 
     # ── Helpers ──────────────────────────────────────────────────────────
 

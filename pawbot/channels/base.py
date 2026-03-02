@@ -255,7 +255,7 @@ class BaseChannel(ABC):
             return []
         try:
             return self.memory.search(f"contact_id:{contact_id}", limit=limit)
-        except Exception:
+        except Exception as e:  # noqa: F841
             return []
 
     @property

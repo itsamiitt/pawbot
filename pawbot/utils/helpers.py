@@ -39,7 +39,7 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
     from importlib.resources import files as pkg_files
     try:
         tpl = pkg_files("pawbot") / "templates"
-    except Exception:
+    except Exception as e:  # noqa: F841
         return []
     if not tpl.is_dir():
         return []

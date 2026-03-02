@@ -195,7 +195,7 @@ class SlackChannel(BaseChannel):
                 },
                 session_key=session_key,
             )
-        except Exception:
+        except Exception as e:  # noqa: F841
             logger.exception("Error handling Slack message from {}", sender_id)
 
     def _is_allowed(self, sender_id: str, chat_id: str, channel_type: str) -> bool:

@@ -237,7 +237,7 @@ async def _iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], 
                     continue
                 try:
                     yield json.loads(data)
-                except Exception:
+                except Exception as e:  # noqa: F841
                     continue
             continue
         buffer.append(line)
@@ -282,7 +282,7 @@ async def _consume_sse(response: httpx.Response) -> tuple[str, list[ToolCallRequ
                 args_raw = buf.get("arguments") or item.get("arguments") or "{}"
                 try:
                     args = json.loads(args_raw)
-                except Exception:
+                except Exception as e:  # noqa: F841
                     args = {"raw": args_raw}
                 tool_calls.append(
                     ToolCallRequest(

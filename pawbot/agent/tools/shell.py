@@ -144,7 +144,7 @@ class ExecTool(Tool):
             for raw in self._extract_absolute_paths(cmd):
                 try:
                     p = Path(raw.strip()).resolve()
-                except Exception:
+                except Exception as e:  # noqa: F841
                     continue
                 if p.is_absolute() and cwd_path not in p.parents and p != cwd_path:
                     return "Error: Command blocked by safety guard (path outside working dir)"

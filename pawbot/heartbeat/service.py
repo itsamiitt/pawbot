@@ -78,7 +78,7 @@ class HeartbeatService:
         if self.heartbeat_file.exists():
             try:
                 return self.heartbeat_file.read_text(encoding="utf-8")
-            except Exception:
+            except Exception as e:  # noqa: F841
                 return None
         return None
 
@@ -159,7 +159,7 @@ class HeartbeatService:
                 if response and self.on_notify:
                     logger.info("Heartbeat: completed, delivering response")
                     await self.on_notify(response)
-        except Exception:
+        except Exception as e:  # noqa: F841
             logger.exception("Heartbeat execution failed")
 
     async def trigger_now(self) -> str | None:

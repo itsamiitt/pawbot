@@ -281,7 +281,7 @@ class MochatChannel(BaseChannel):
         if self._socket:
             try:
                 await self._socket.disconnect()
-            except Exception:
+            except Exception as e:  # noqa: F841
                 pass
             self._socket = None
 
@@ -410,7 +410,7 @@ class MochatChannel(BaseChannel):
             logger.error("Failed to connect Mochat websocket: {}", e)
             try:
                 await client.disconnect()
-            except Exception:
+            except Exception as e:  # noqa: F841
                 pass
             self._socket = None
             return False
@@ -867,7 +867,7 @@ class MochatChannel(BaseChannel):
             raise RuntimeError(f"Mochat HTTP {response.status_code}: {response.text[:200]}")
         try:
             parsed = response.json()
-        except Exception:
+        except Exception as e:  # noqa: F841
             parsed = response.text
         if isinstance(parsed, dict) and isinstance(parsed.get("code"), int):
             if parsed["code"] != 200:

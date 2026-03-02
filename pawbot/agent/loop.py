@@ -233,7 +233,7 @@ Respond with ONLY the JSON array."""
                 ]
                 if relevant_decisions:
                     score += 0.15  # past precedent supports this approach
-            except Exception:
+            except Exception as e:  # noqa: F841
                 pass  # graceful degradation
 
         approach["score"] = round(score, 2)
@@ -366,7 +366,7 @@ class AgentLoop:
             if self._mcp_stack:
                 try:
                     await self._mcp_stack.aclose()
-                except Exception:
+                except Exception as e:  # noqa: F841
                     pass
                 self._mcp_stack = None
         finally:
@@ -561,7 +561,7 @@ class AgentLoop:
             except asyncio.CancelledError:
                 logger.info("Task cancelled for session {}", msg.session_key)
                 raise
-            except Exception:
+            except Exception as e:  # noqa: F841
                 logger.exception("Error processing message for session {}", msg.session_key)
                 await self.bus.publish_outbound(OutboundMessage(
                     channel=msg.channel, chat_id=msg.chat_id,
@@ -636,7 +636,7 @@ class AgentLoop:
                                 channel=msg.channel, chat_id=msg.chat_id,
                                 content="Memory archival failed, session not cleared. Please try again.",
                             )
-            except Exception:
+            except Exception as e:  # noqa: F841
                 logger.exception("/new archival failed for {}", session.key)
                 return OutboundMessage(
                     channel=msg.channel, chat_id=msg.chat_id,
@@ -1013,7 +1013,7 @@ class AgentLoop:
                         r for r in reflections if r.get("type") == "reflection"
                     ]
                     self._session_meta["correction_reflections"] = correction_reflections
-                except Exception:
+                except Exception as e:  # noqa: F841
                     pass
             self._session_meta["replan_signal"] = True
 

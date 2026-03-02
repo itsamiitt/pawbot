@@ -1,9 +1,11 @@
 """Configuration loading utilities."""
 
-import json
+import logging
 from pathlib import Path
 
 from pawbot.config.schema import Config
+
+logger = logging.getLogger("pawbot.config")
 
 
 def get_config_path() -> Path:
@@ -27,19 +29,21 @@ def load_config(config_path: Path | None = None) -> Config:
     Returns:
         Loaded configuration object.
     """
+    from pawbot.utils.fs import safe_read_json
+
     path = config_path or get_config_path()
+    data = safe_read_json(path, default={})
 
-    if path.exists():
-        try:
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-            data = _migrate_config(data)
-            return Config.model_validate(data)
-        except (json.JSONDecodeError, ValueError) as e:
-            print(f"Warning: Failed to load config from {path}: {e}")
-            print("Using default configuration.")
+    if not data:
+        logger.warning("config.json is missing or empty — using defaults. Run: pawbot onboard")
+        return Config()
 
-    return Config()
+    try:
+        data = _migrate_config(data)
+        return Config.model_validate(data)
+    except ValueError as e:
+        logger.error(f"config.json validation failed: {e}. Returning defaults.")
+        return Config()
 
 
 def save_config(config: Config, config_path: Path | None = None) -> None:
@@ -61,8 +65,8 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
             # Keep canonical top-level key for MCP server registrations.
             data["mcp_servers"] = mcp_cfg
 
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    from pawbot.utils.fs import write_json_with_backup
+    write_json_with_backup(path, data)
 
 
 def _migrate_config(data: dict) -> dict:

@@ -547,7 +547,7 @@ class FeishuChannel(BaseChannel):
             else:
                 logger.error("Failed to download {}: code={}, msg={}", resource_type, response.code, response.msg)
                 return None, None
-        except Exception:
+        except Exception as e:  # noqa: F841
             logger.exception("Error downloading {} {}", resource_type, file_key)
             return None, None
 

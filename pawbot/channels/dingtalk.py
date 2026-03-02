@@ -317,7 +317,7 @@ class DingTalkChannel(BaseChannel):
                 logger.error("DingTalk send failed msgKey={} status={} body={}", msg_key, resp.status_code, body[:500])
                 return False
             try: result = resp.json()
-            except Exception: result = {}
+            except Exception as e:  # noqa: F841 result = {}
             errcode = result.get("errcode")
             if errcode not in (None, 0):
                 logger.error("DingTalk send api error msgKey={} errcode={} body={}", msg_key, errcode, body[:500])

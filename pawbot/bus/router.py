@@ -152,7 +152,7 @@ class ChannelRouter:
         if self.memory:
             try:
                 history = self.memory.search(f"contact_id:{msg.contact_id}", limit=10)
-            except Exception:
+            except Exception as e:  # noqa: F841
                 pass
 
         context = {

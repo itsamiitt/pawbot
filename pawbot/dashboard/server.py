@@ -57,7 +57,7 @@ def _load_raw_config() -> dict:
     if CONFIG_PATH.exists():
         try:
             return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as e:  # noqa: F841
             return {}
     return {}
 
@@ -65,7 +65,8 @@ def _load_raw_config() -> dict:
 def _save_raw_config(data: dict) -> None:
     """Save raw config dict."""
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    from pawbot.utils.fs import write_json_with_backup
+    write_json_with_backup(CONFIG_PATH, data)
 
 
 def _mask_key(key: str) -> str:
@@ -83,7 +84,7 @@ def _agent_status() -> str:
             capture_output=True, text=True, timeout=5
         )
         return "online" if result.returncode == 0 else "offline"
-    except Exception:
+    except Exception as e:  # noqa: F841
         return "offline"
 
 
@@ -109,7 +110,7 @@ def _count_cron_jobs() -> int:
         if isinstance(jobs, dict):
             return len(jobs)
         return 0
-    except Exception:
+    except Exception as e:  # noqa: F841
         return 0
 
 
@@ -121,7 +122,7 @@ def _count_memories() -> int:
             content = mem_file.read_text(encoding="utf-8")
             return len([l for l in content.splitlines() if l.strip().startswith("- ")])
         return 0
-    except Exception:
+    except Exception as e:  # noqa: F841
         return 0
 
 
@@ -212,7 +213,7 @@ async def health():
             "status": "ok" if result.returncode == 0 else "warn",
             "fix": "Install Node.js 18+ for WhatsApp"
         })
-    except Exception:
+    except Exception as e:  # noqa: F841
         checks.append({
             "label": "Node.js",
             "status": "warn",
@@ -280,7 +281,8 @@ async def set_model(body: dict):
 async def save_soul(body: dict):
     soul_path = PAWBOT_HOME / "workspace" / "SOUL.md"
     soul_path.parent.mkdir(parents=True, exist_ok=True)
-    soul_path.write_text(body["content"], encoding="utf-8")
+    from pawbot.utils.fs import atomic_write_text
+    atomic_write_text(soul_path, body["content"])
     return {"ok": True}
 
 
@@ -365,7 +367,7 @@ async def list_cron():
         if path.exists():
             try:
                 return {"jobs": json.loads(path.read_text(encoding="utf-8"))}
-            except Exception:
+            except Exception as e:  # noqa: F841
                 pass
     return {"jobs": []}
 
@@ -508,7 +510,7 @@ async def get_log(filename: str, tail: int = 200, search: str = None, level: str
         return {"lines": [], "total": 0}
     try:
         lines = log_path.read_text(encoding="utf-8").splitlines()
-    except Exception:
+    except Exception as e:  # noqa: F841
         return {"lines": [], "total": 0}
     if search:
         lines = [l for l in lines if search.lower() in l.lower()]

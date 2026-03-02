@@ -186,7 +186,7 @@ class TraceExporter:
             return [json.loads(line) for line in lines[-n:] if line.strip()]
         except FileNotFoundError:
             return []
-        except Exception:
+        except Exception as e:  # noqa: F841
             return []
 
 

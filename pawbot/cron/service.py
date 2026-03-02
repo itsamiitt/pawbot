@@ -40,7 +40,7 @@ def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
             cron = croniter(schedule.expr, base_dt)
             next_dt = cron.get_next(datetime)
             return int(next_dt.timestamp() * 1000)
-        except Exception:
+        except Exception as e:  # noqa: F841
             return None
 
     return None
@@ -56,7 +56,7 @@ def _validate_schedule_for_add(schedule: CronSchedule) -> None:
             from zoneinfo import ZoneInfo
 
             ZoneInfo(schedule.tz)
-        except Exception:
+        except Exception as e:  # noqa: F841
             raise ValueError(f"unknown timezone '{schedule.tz}'") from None
 
 
@@ -85,9 +85,10 @@ class CronService:
         if self._store:
             return self._store
 
-        if self.store_path.exists():
+        from pawbot.utils.fs import safe_read_json
+        data = safe_read_json(self.store_path, default={})
+        if data:
             try:
-                data = json.loads(self.store_path.read_text(encoding="utf-8"))
                 jobs = []
                 for j in data.get("jobs", []):
                     jobs.append(CronJob(
@@ -120,7 +121,7 @@ class CronService:
                     ))
                 self._store = CronStore(jobs=jobs)
             except Exception as e:
-                logger.warning("Failed to load cron store: {}", e)
+                logger.warning("Failed to parse cron store: {}", e)
                 self._store = CronStore()
         else:
             self._store = CronStore()
@@ -169,7 +170,8 @@ class CronService:
             ]
         }
 
-        self.store_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        from pawbot.utils.fs import write_json_with_backup
+        write_json_with_backup(self.store_path, data)
         self._last_mtime = self.store_path.stat().st_mtime
     
     async def start(self) -> None:

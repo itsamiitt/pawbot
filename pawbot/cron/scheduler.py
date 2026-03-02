@@ -166,7 +166,7 @@ class CronScheduler:
         while self._running:
             try:
                 self._check_due_jobs()
-            except Exception:
+            except Exception as e:  # noqa: F841
                 logger.exception("CronScheduler loop iteration failed")
             time.sleep(self.check_interval_seconds)
 
@@ -236,7 +236,8 @@ class CronScheduler:
             }
             for name, job in self._jobs.items()
         }
-        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        from pawbot.utils.fs import atomic_write_json
+        atomic_write_json(path, data)
 
     def _load_registry(self) -> None:
         path = Path(self.registry_path)

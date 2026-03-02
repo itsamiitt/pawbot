@@ -121,7 +121,7 @@ class SessionManager:
                 try:
                     shutil.move(str(legacy_path), str(path))
                     logger.info("Migrated session {} from legacy path", key)
-                except Exception:
+                except Exception as e:  # noqa: F841
                     logger.exception("Failed to migrate session {}", key)
 
         if not path.exists():
@@ -206,7 +206,7 @@ class SessionManager:
                                 "updated_at": data.get("updated_at"),
                                 "path": str(path)
                             })
-            except Exception:
+            except Exception as e:  # noqa: F841
                 continue
 
         return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)

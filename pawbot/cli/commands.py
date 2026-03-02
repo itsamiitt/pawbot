@@ -52,14 +52,14 @@ def _flush_pending_tty_input() -> None:
         fd = sys.stdin.fileno()
         if not os.isatty(fd):
             return
-    except Exception:
+    except Exception as e:  # noqa: F841
         return
 
     try:
         import termios
         termios.tcflush(fd, termios.TCIFLUSH)
         return
-    except Exception:
+    except Exception as e:  # noqa: F841
         pass
 
     try:
@@ -69,7 +69,7 @@ def _flush_pending_tty_input() -> None:
                 break
             if not os.read(fd, 4096):
                 break
-    except Exception:
+    except Exception as e:  # noqa: F841
         return
 
 
@@ -80,7 +80,7 @@ def _restore_terminal() -> None:
     try:
         import termios
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _SAVED_TERM_ATTRS)
-    except Exception:
+    except Exception as e:  # noqa: F841
         pass
 
 
@@ -92,7 +92,7 @@ def _init_prompt_session() -> None:
     try:
         import termios
         _SAVED_TERM_ATTRS = termios.tcgetattr(sys.stdin.fileno())
-    except Exception:
+    except Exception as e:  # noqa: F841
         pass
 
     history_file = Path.home() / ".pawbot" / "history" / "cli_history"
@@ -888,10 +888,10 @@ def _get_bridge_dir() -> Path:
     # Install and build
     try:
         console.print("  Installing dependencies...")
-        subprocess.run(["npm", "install"], cwd=user_bridge, check=True, capture_output=True)
+        subprocess.run(["npm", "install"], cwd=user_bridge, check=True, capture_output=True, timeout=300)
 
         console.print("  Building...")
-        subprocess.run(["npm", "run", "build"], cwd=user_bridge, check=True, capture_output=True)
+        subprocess.run(["npm", "run", "build"], cwd=user_bridge, check=True, capture_output=True, timeout=120)
 
         console.print("[green]✓[/green] Bridge ready\n")
     except subprocess.CalledProcessError as e:
@@ -921,7 +921,7 @@ def channels_login():
         env["BRIDGE_TOKEN"] = config.channels.whatsapp.bridge_token
 
     try:
-        subprocess.run(["npm", "start"], cwd=bridge_dir, check=True, env=env)
+        subprocess.run(["npm", "start"], cwd=bridge_dir, check=True, env=env, timeout=None)
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Bridge failed: {e}[/red]")
     except FileNotFoundError:
@@ -979,7 +979,7 @@ def cron_list(
             try:
                 tz = ZoneInfo(job.schedule.tz) if job.schedule.tz else None
                 next_run = _dt.fromtimestamp(ts, tz).strftime("%Y-%m-%d %H:%M")
-            except Exception:
+            except Exception as e:  # noqa: F841
                 next_run = time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
 
         status = "[green]enabled[/green]" if job.enabled else "[dim]disabled[/dim]"
@@ -1232,7 +1232,7 @@ def _login_openai_codex() -> None:
         token = None
         try:
             token = get_token()
-        except Exception:
+        except Exception as e:  # noqa: F841
             pass
         if not (token and token.access):
             console.print("[cyan]Starting interactive OAuth login...[/cyan]\n")

@@ -99,7 +99,7 @@ def _render_markdown_html(text: str) -> str | None:
     """Render markdown to sanitized HTML; returns None for plain text."""
     try:
         formatted = MATRIX_HTML_CLEANER.clean(MATRIX_MARKDOWN(text)).strip()
-    except Exception:
+    except Exception as e:  # noqa: F841
         return None
     if not formatted:
         return None
@@ -184,7 +184,7 @@ class MatrixChannel(BaseChannel):
         if self.config.device_id:
             try:
                 self.client.load_store()
-            except Exception:
+            except Exception as e:  # noqa: F841
                 logger.exception("Matrix store load failed; restart may replay recent messages.")
         else:
             logger.warning("Matrix device_id empty; restart may replay recent messages.")
@@ -280,7 +280,7 @@ class MatrixChannel(BaseChannel):
             return None
         try:
             response = await self.client.content_repository_config()
-        except Exception:
+        except Exception as e:  # noqa: F841
             return None
         upload_size = getattr(response, "upload_size", None)
         if isinstance(upload_size, int) and upload_size > 0:
@@ -325,7 +325,7 @@ class MatrixChannel(BaseChannel):
                     encrypt=self.config.e2ee_enabled and self._is_encrypted_room(room_id),
                     filesize=size_bytes,
                 )
-        except Exception:
+        except Exception as e:  # noqa: F841
             return fail
 
         upload_response = upload_result[0] if isinstance(upload_result, tuple) else upload_result
@@ -344,7 +344,7 @@ class MatrixChannel(BaseChannel):
             content["m.relates_to"] = relates_to
         try:
             await self._send_room_content(room_id, content)
-        except Exception:
+        except Exception as e:  # noqa: F841
             return fail
         return None
 
@@ -414,7 +414,7 @@ class MatrixChannel(BaseChannel):
                                                      timeout=TYPING_NOTICE_TIMEOUT_MS)
             if isinstance(response, RoomTypingError):
                 logger.debug("Matrix typing failed for {}: {}", room_id, response)
-        except Exception:
+        except Exception as e:  # noqa: F841
             pass
 
     async def _start_typing_keepalive(self, room_id: str) -> None:
@@ -450,7 +450,7 @@ class MatrixChannel(BaseChannel):
                 await self.client.sync_forever(timeout=30000, full_state=True)
             except asyncio.CancelledError:
                 break
-            except Exception:
+            except Exception as e:  # noqa: F841
                 await asyncio.sleep(2)
 
     async def _on_room_invite(self, room: MatrixRoom, event: InviteEvent) -> None:
@@ -669,7 +669,7 @@ class MatrixChannel(BaseChannel):
                 sender_id=event.sender, chat_id=room.room_id,
                 content=event.body, metadata=self._base_metadata(room, event),
             )
-        except Exception:
+        except Exception as e:  # noqa: F841
             await self._stop_typing_keepalive(room.room_id, clear_typing=True)
             raise
 
@@ -694,6 +694,6 @@ class MatrixChannel(BaseChannel):
                 media=[attachment["path"]] if attachment else [],
                 metadata=meta,
             )
-        except Exception:
+        except Exception as e:  # noqa: F841
             await self._stop_typing_keepalive(room.room_id, clear_typing=True)
             raise

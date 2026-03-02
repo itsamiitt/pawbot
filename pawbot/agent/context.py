@@ -302,7 +302,7 @@ class TaskTypeDetector:
                 .lower()
             )
             return result if result in TASK_TYPES else "casual_chat"
-        except Exception:
+        except Exception as e:  # noqa: F841
             return "casual_chat"
 
 
@@ -409,7 +409,7 @@ class ContextBuilder:
             for name in skill_names:
                 try:
                     skill = self.skills.get(name)
-                except Exception:
+                except Exception as e:  # noqa: F841
                     skill = None
                 if skill is not None:
                     selected.append(skill)
@@ -834,7 +834,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
                 if content:
                     parts.append(f"{role}: {content[:200]}")
             return "\n".join(parts)
-        except Exception:
+        except Exception as e:  # noqa: F841
             return ""
 
     def _assemble_messages(
@@ -927,6 +927,6 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         if self.model_router is not None:
             try:
                 return self.model_router.current_provider_type()
-            except Exception:
+            except Exception as e:  # noqa: F841
                 pass
         return "unknown"

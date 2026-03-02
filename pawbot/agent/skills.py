@@ -32,14 +32,14 @@ def _to_config_dict(config: Any | None) -> dict[str, Any]:
             data = config.model_dump(by_alias=False)
             if isinstance(data, dict):
                 return data
-        except Exception:
+        except Exception as e:  # noqa: F841
             pass
     if hasattr(config, "dict"):
         try:
             data = config.dict()
             if isinstance(data, dict):
                 return data
-        except Exception:
+        except Exception as e:  # noqa: F841
             pass
     return {}
 
@@ -151,7 +151,7 @@ class SkillWriter:
 
         try:
             version = float(skill.version)
-        except Exception:
+        except Exception as e:  # noqa: F841
             version = 1.0
         skill.version = f"{version + 0.1:.1f}"
 
@@ -246,10 +246,8 @@ class SkillWriter:
     def _save(self, skill: Skill) -> None:
         path = self._skill_path(skill.name)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(dataclasses.asdict(skill), indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        from pawbot.utils.fs import atomic_write_json
+        atomic_write_json(path, dataclasses.asdict(skill))
 
     def _save_skill_memory(self, skill: Skill) -> None:
         """Persist skill stats to memory as a procedure (best effort)."""
@@ -736,7 +734,8 @@ class LoRAPipeline:
             "fp16": True,
         }
         config_path = self.dataset_path.parent / "axolotl_config.yaml"
-        config_path.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
+        from pawbot.utils.fs import atomic_write_json
+        atomic_write_json(config_path, config)
         return str(config_path)
 
     def training_stats(self) -> dict[str, Any]:

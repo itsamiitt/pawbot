@@ -91,7 +91,7 @@ class QQChannel(BaseChannel):
         if self._client:
             try:
                 await self._client.close()
-            except Exception:
+            except Exception as e:  # noqa: F841
                 pass
         logger.info("QQ bot stopped")
 
@@ -131,5 +131,5 @@ class QQChannel(BaseChannel):
                 content=content,
                 metadata={"message_id": data.id},
             )
-        except Exception:
+        except Exception as e:  # noqa: F841
             logger.exception("Error handling QQ message")

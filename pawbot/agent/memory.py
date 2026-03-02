@@ -96,14 +96,14 @@ def _to_config_dict(config: dict[str, Any] | Any | None) -> dict[str, Any]:
             data = config.model_dump(by_alias=False)
             if isinstance(data, dict):
                 return data
-        except Exception:
+        except Exception as e:  # noqa: F841
             pass
     if hasattr(config, "dict"):
         try:
             data = config.dict()
             if isinstance(data, dict):
                 return data
-        except Exception:
+        except Exception as e:  # noqa: F841
             pass
     return {}
 
@@ -122,14 +122,14 @@ def _memory_text(content: Any) -> str:
 def _coerce_float(value: Any, default: float) -> float:
     try:
         return float(value)
-    except Exception:
+    except Exception as e:  # noqa: F841
         return default
 
 
 def _coerce_int(value: Any, default: int) -> int:
     try:
         return int(value)
-    except Exception:
+    except Exception as e:  # noqa: F841
         return default
 
 
@@ -309,7 +309,7 @@ class RedisWorkingMemory(MemoryProvider):
             memory_id = key.rsplit(":", 1)[-1]
             try:
                 content = json.loads(raw.get("content", "{}"))
-            except Exception:
+            except Exception as e:  # noqa: F841
                 content = {"text": raw.get("content", "")}
             items.append(
                 (
@@ -376,7 +376,7 @@ class RedisWorkingMemory(MemoryProvider):
             if hasattr(self.client, "lrem"):
                 self.client.lrem(msg_key, 0, memory_id)
             return deleted
-        except Exception:
+        except Exception as e:  # noqa: F841
             logger.exception("Redis delete failed for {}", memory_id)
             return False
 
@@ -405,7 +405,7 @@ class RedisWorkingMemory(MemoryProvider):
             raw = self.client.hgetall(key)
             try:
                 existing = json.loads(raw.get("content", "{}"))
-            except Exception:
+            except Exception as e:  # noqa: F841
                 existing = {}
             merged = dict(existing) if isinstance(existing, dict) else {}
             merged.update(payload)
@@ -419,7 +419,7 @@ class RedisWorkingMemory(MemoryProvider):
             )
             self._touch_redis(memory_id)
             return True
-        except Exception:
+        except Exception as e:  # noqa: F841
             logger.exception("Redis update failed for {}", memory_id)
             return False
 
@@ -620,7 +620,7 @@ class SQLiteFactStore(MemoryProvider):
     def _row_to_memory(self, row: sqlite3.Row, query: str = "") -> dict[str, Any]:
         try:
             payload = json.loads(row["content"])
-        except Exception:
+        except Exception as e:  # noqa: F841
             payload = {"text": row["content"]}
         text = _memory_text(payload)
         relevance = 1.0 if not query else SequenceMatcher(None, query.lower(), text.lower()).ratio()
@@ -628,7 +628,7 @@ class SQLiteFactStore(MemoryProvider):
             relevance = max(relevance, 0.95)
         try:
             tags = json.loads(row["tags"] or "[]")
-        except Exception:
+        except Exception as e:  # noqa: F841
             tags = []
         return {
             "id": row["id"],
@@ -710,7 +710,7 @@ class SQLiteFactStore(MemoryProvider):
                 return False
             try:
                 existing = json.loads(row["content"])
-            except Exception:
+            except Exception as e:  # noqa: F841
                 existing = {}
             if not isinstance(existing, dict):
                 existing = {"text": _memory_text(existing)}
@@ -774,7 +774,7 @@ class SQLiteFactStore(MemoryProvider):
             salience = max(0.0, _coerce_float(row["salience"], 1.0) + delta)
             try:
                 content = json.loads(row["content"])
-            except Exception:
+            except Exception as e:  # noqa: F841
                 content = {}
             if not isinstance(content, dict):
                 content = {"text": _memory_text(content)}
@@ -818,7 +818,7 @@ class SQLiteFactStore(MemoryProvider):
                 if should_accept:
                     try:
                         content = json.loads(row["content"])
-                    except Exception:
+                    except Exception as e:  # noqa: F841
                         content = {"text": row["content"]}
                     memory_id = self._save_with_conn(conn, row["proposed_type"], content)
                     accepted_ids.append(memory_id)
@@ -865,7 +865,7 @@ class ChromaEpisodeStore(MemoryProvider):
                         model_name="nomic-embed-text",
                     )
                     self._embedding_backend = "ollama"
-                except Exception:
+                except Exception as e:  # noqa: F841
                     ef = embedding_functions.SentenceTransformerEmbeddingFunction(
                         model_name="all-MiniLM-L6-v2"
                     )
@@ -975,7 +975,7 @@ class ChromaEpisodeStore(MemoryProvider):
         try:
             self.collection.delete(ids=[memory_id])
             return True
-        except Exception:
+        except Exception as e:  # noqa: F841
             logger.exception("Chroma delete failed for {}", memory_id)
             return False
 
@@ -1000,7 +1000,7 @@ class ChromaEpisodeStore(MemoryProvider):
                 meta["salience"] = _coerce_float(content.get("salience"), 1.0)
             self.collection.update(ids=[memory_id], documents=[_memory_text(content)], metadatas=[meta])
             return True
-        except Exception:
+        except Exception as e:  # noqa: F841
             logger.exception("Chroma update failed for {}", memory_id)
             return False
 
@@ -1028,7 +1028,7 @@ class ChromaEpisodeStore(MemoryProvider):
                 out.append(self._make_result(memory_id, doc, meta, ""))
             out.sort(key=lambda x: x.get("created_at", 0), reverse=True)
             return out
-        except Exception:
+        except Exception as e:  # noqa: F841
             logger.exception("Chroma list_all failed")
             return []
 
@@ -1048,19 +1048,19 @@ class MemoryRouter(MemoryProvider):
         if backends_cfg.get("redis", {}).get("enabled", True):
             try:
                 self.redis = RedisWorkingMemory(session_id, self.config)
-            except Exception:
+            except Exception as e:  # noqa: F841
                 logger.exception("Redis backend init failed")
 
         if backends_cfg.get("sqlite", {}).get("enabled", True):
             try:
                 self.sqlite = SQLiteFactStore(self.config)
-            except Exception:
+            except Exception as e:  # noqa: F841
                 logger.exception("SQLite backend init failed")
 
         if backends_cfg.get("chroma", {}).get("enabled", True):
             try:
                 self.chroma = ChromaEpisodeStore(self.config)
-            except Exception:
+            except Exception as e:  # noqa: F841
                 logger.exception("Chroma backend init failed")
 
         if self.sqlite is None:
@@ -1133,12 +1133,12 @@ class MemoryRouter(MemoryProvider):
             if self.chroma is not None:
                 try:
                     primary_id = self.chroma.save(type, copy.deepcopy(payload))
-                except Exception:
+                except Exception as e:  # noqa: F841
                     logger.exception("Episode save to chroma failed")
             if self.sqlite is not None:
                 try:
                     self.sqlite.save(type, copy.deepcopy(payload))
-                except Exception:
+                except Exception as e:  # noqa: F841
                     logger.exception("Episode save to sqlite failed")
         elif type in persistent_types:
             if self.sqlite is not None:
@@ -1147,7 +1147,7 @@ class MemoryRouter(MemoryProvider):
             if self.redis is not None:
                 try:
                     primary_id = self.redis.save(type, copy.deepcopy(payload))
-                except Exception:
+                except Exception as e:  # noqa: F841
                     logger.exception("Working memory save to redis failed")
                     if self.sqlite is not None:
                         primary_id = self.sqlite.save(type, copy.deepcopy(payload))
@@ -1161,7 +1161,7 @@ class MemoryRouter(MemoryProvider):
             try:
                 payload.pop("_memory_id", None)
                 self.linker.link_async(primary_id, payload)
-            except Exception:
+            except Exception as e:  # noqa: F841
                 logger.exception("Memory linker dispatch failed")
 
         return primary_id
@@ -1178,7 +1178,7 @@ class MemoryRouter(MemoryProvider):
                 rows.extend(fn(query=query, limit=limit, memory_type=memory_type))
             except TypeError:
                 rows.extend(fn(query=query, limit=limit))
-            except Exception:
+            except Exception as e:  # noqa: F841
                 logger.exception("Backend {} {} failed", backend.__class__.__name__, method)
         return rows
 
@@ -1204,7 +1204,7 @@ class MemoryRouter(MemoryProvider):
                 continue
             try:
                 ok = backend.delete(memory_id) or ok
-            except Exception:
+            except Exception as e:  # noqa: F841
                 logger.exception("Backend {} delete failed", backend.__class__.__name__)
         return ok
 
@@ -1215,7 +1215,7 @@ class MemoryRouter(MemoryProvider):
                 continue
             try:
                 ok = backend.update(memory_id, content) or ok
-            except Exception:
+            except Exception as e:  # noqa: F841
                 logger.exception("Backend {} update failed", backend.__class__.__name__)
         return ok
 
@@ -1226,7 +1226,7 @@ class MemoryRouter(MemoryProvider):
                 continue
             try:
                 rows.extend(backend.list_all(type))
-            except Exception:
+            except Exception as e:  # noqa: F841
                 logger.exception("Backend {} list_all failed", backend.__class__.__name__)
         rows = self._dedupe(rows)
         rows.sort(key=self._combined_score, reverse=True)
@@ -1276,13 +1276,13 @@ class MemoryLinker:
             try:
                 rows = self.router.chroma.search(text, limit=5)
                 candidates.extend([row.get("id") for row in rows if row.get("id")])
-            except Exception:
+            except Exception as e:  # noqa: F841
                 logger.exception("Link candidate query via chroma failed")
         if not candidates and self.router.sqlite is not None:
             try:
                 rows = self.router.sqlite.search(text, limit=5)
                 candidates.extend([row.get("id") for row in rows if row.get("id")])
-            except Exception:
+            except Exception as e:  # noqa: F841
                 logger.exception("Link candidate query via sqlite failed")
         seen: set[str] = set()
         out: list[str] = []
@@ -1454,7 +1454,7 @@ def memory_stats(router: MemoryRouter | None = None) -> dict[str, Any]:
                 stats["episodes"] = max(stats.get("episodes", 0), len(router.chroma._fallback))
             else:
                 stats["episodes"] = max(stats.get("episodes", 0), _coerce_int(router.chroma.collection.count(), 0))
-        except Exception:
+        except Exception as e:  # noqa: F841
             logger.exception("Failed to count episodes from chroma")
 
     if router.redis is not None:
@@ -1463,7 +1463,7 @@ def memory_stats(router: MemoryRouter | None = None) -> dict[str, Any]:
                 stats["redis_keys"] = len(router.redis._fallback)
             else:
                 stats["redis_keys"] = len(router.redis.client.keys(router.redis._key("*")))
-        except Exception:
+        except Exception as e:  # noqa: F841
             logger.exception("Failed to count redis keys")
 
     return stats
@@ -1479,7 +1479,7 @@ class MemoryStore:
         self.router = MemoryRouter(f"workspace:{self.memory_dir}", {})
         try:
             _migrate_legacy_files(self.router)
-        except Exception:
+        except Exception as e:  # noqa: F841
             logger.exception("Legacy memory migration failed")
 
     def read_long_term(self) -> str:
@@ -1488,10 +1488,11 @@ class MemoryStore:
         return ""
 
     def write_long_term(self, content: str) -> None:
-        self.memory_file.write_text(content, encoding="utf-8")
+        from pawbot.utils.fs import atomic_write_text
+        atomic_write_text(self.memory_file, content)
         try:
             self.router.save("fact", {"text": content, "source": "MEMORY.md"})
-        except Exception:
+        except Exception as e:  # noqa: F841
             logger.exception("Failed to persist MEMORY.md snapshot into router")
 
     def append_history(self, entry: str) -> None:
@@ -1499,7 +1500,7 @@ class MemoryStore:
             f.write(entry.rstrip() + "\n\n")
         try:
             self.router.save("episode", {"text": entry, "source": "HISTORY.md"})
-        except Exception:
+        except Exception as e:  # noqa: F841
             logger.exception("Failed to persist history entry into router")
 
     def get_memory_context(self) -> str:
@@ -1590,6 +1591,6 @@ class MemoryStore:
                 session.last_consolidated,
             )
             return True
-        except Exception:
+        except Exception as e:  # noqa: F841
             logger.exception("Memory consolidation failed")
             return False
