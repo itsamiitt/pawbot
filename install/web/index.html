@@ -1,0 +1,1535 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pawbot — Your Personal AI Assistant</title>
+    <meta name="description"
+        content="Pawbot is a personal AI assistant that lives on your machine, talks on every device, and remembers everything. Install in one command.">
+    <meta name="theme-color" content="#080808">
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link
+        href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&display=swap"
+        rel="stylesheet">
+    <style>
+        /* ── Reset & Tokens ──────────────────────────────────────────────────────── */
+        :root {
+            --bg: #080808;
+            --surface: #101010;
+            --border: #1c1c1c;
+            --text: #f0f0f0;
+            --muted: #555555;
+            --dim: #2a2a2a;
+            --green: #00e87a;
+            --green-glow: #00e87a14;
+            --warm: #f5f0e8;
+            --code-bg: #0d1117;
+        }
+
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'DM Mono', monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            overflow-x: hidden;
+        }
+
+        a {
+            color: var(--green);
+            text-decoration: none;
+            transition: opacity 0.2s;
+        }
+
+        a:hover {
+            opacity: 0.85;
+        }
+
+        ::selection {
+            background: var(--green);
+            color: var(--bg);
+        }
+
+        .container {
+            max-width: 860px;
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+
+        /* ── Noise overlay ───────────────────────────────────────────────────────── */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.03'/%3E%3C/svg%3E");
+            pointer-events: none;
+            z-index: 9999;
+            opacity: 0.5;
+        }
+
+        /* ── Cursor spotlight ────────────────────────────────────────────────────── */
+        .cursor-glow {
+            position: fixed;
+            width: 600px;
+            height: 600px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(0, 232, 122, 0.06) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+            transform: translate(-50%, -50%);
+            transition: opacity 0.3s ease;
+            will-change: left, top;
+        }
+
+        /* ── Reveal Animations ───────────────────────────────────────────────────── */
+        .reveal {
+            opacity: 0;
+            transform: translateY(32px);
+            transition: opacity 0.8s cubic-bezier(.16, 1, .3, 1), transform 0.8s cubic-bezier(.16, 1, .3, 1);
+        }
+
+        .reveal.visible {
+            opacity: 1;
+            transform: none;
+        }
+
+        .reveal-stagger>* {
+            opacity: 0;
+            transform: translateY(24px);
+            transition: opacity 0.7s cubic-bezier(.16, 1, .3, 1), transform 0.7s cubic-bezier(.16, 1, .3, 1);
+        }
+
+        .reveal-stagger.visible>*:nth-child(1) {
+            opacity: 1;
+            transform: none;
+            transition-delay: 0s;
+        }
+
+        .reveal-stagger.visible>*:nth-child(2) {
+            opacity: 1;
+            transform: none;
+            transition-delay: 0.15s;
+        }
+
+        .reveal-stagger.visible>*:nth-child(3) {
+            opacity: 1;
+            transform: none;
+            transition-delay: 0.3s;
+        }
+
+        /* ── Hero Load Animations ────────────────────────────────────────────────── */
+        .hero-headline {
+            animation: rise 1s cubic-bezier(.16, 1, .3, 1) 0.15s both;
+        }
+
+        .hero-sub {
+            animation: rise 1s cubic-bezier(.16, 1, .3, 1) 0.3s both;
+        }
+
+        .hero-terminal {
+            animation: rise 1s cubic-bezier(.16, 1, .3, 1) 0.5s both;
+        }
+
+        .hero-badges {
+            animation: rise 1s cubic-bezier(.16, 1, .3, 1) 0.65s both;
+        }
+
+        @keyframes rise {
+            from {
+                opacity: 0;
+                transform: translateY(36px) scale(0.98);
+            }
+
+            to {
+                opacity: 1;
+                transform: none;
+            }
+        }
+
+        @keyframes blink {
+
+            0%,
+            100% {
+                opacity: 1
+            }
+
+            50% {
+                opacity: 0
+            }
+        }
+
+        @keyframes bob {
+
+            0%,
+            100% {
+                transform: translateX(-50%) translateY(0)
+            }
+
+            50% {
+                transform: translateX(-50%) translateY(8px)
+            }
+        }
+
+        @keyframes float {
+
+            0%,
+            100% {
+                transform: translateY(0)
+            }
+
+            50% {
+                transform: translateY(-12px)
+            }
+        }
+
+        @keyframes pulse-glow {
+
+            0%,
+            100% {
+                box-shadow: 0 0 40px #00e87a10, 0 20px 40px #00000060
+            }
+
+            50% {
+                box-shadow: 0 0 60px #00e87a18, 0 20px 50px #00000070
+            }
+        }
+
+        @keyframes shimmer {
+            0% {
+                background-position: 200% 0
+            }
+
+            100% {
+                background-position: -200% 0
+            }
+        }
+
+        @keyframes rotate {
+            from {
+                transform: rotate(0deg)
+            }
+
+            to {
+                transform: rotate(360deg)
+            }
+        }
+
+        @keyframes dash {
+            to {
+                stroke-dashoffset: 0;
+            }
+        }
+
+        /* ── Header ──────────────────────────────────────────────────────────────── */
+        .site-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 56px;
+            background: rgba(8, 8, 8, 0.88);
+            backdrop-filter: blur(16px) saturate(180%);
+            -webkit-backdrop-filter: blur(16px) saturate(180%);
+            border-bottom: 1px solid var(--border);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .header-inner {
+            max-width: 860px;
+            width: 100%;
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .logo {
+            font-family: 'DM Mono', monospace;
+            font-size: 14px;
+            font-weight: 500;
+            letter-spacing: 0.12em;
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo-emoji {
+            font-size: 20px;
+            filter: drop-shadow(0 0 8px rgba(0, 232, 122, 0.3));
+        }
+
+        .btn-cta {
+            font-family: 'DM Mono', monospace;
+            font-size: 13px;
+            border: 1px solid var(--green);
+            color: var(--green);
+            background: transparent;
+            padding: 8px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(.16, 1, .3, 1);
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn-cta::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: var(--green);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .btn-cta:hover {
+            color: var(--bg);
+            border-color: var(--green);
+            box-shadow: 0 0 24px rgba(0, 232, 122, 0.25);
+            opacity: 1;
+            transform: translateY(-1px);
+        }
+
+        .btn-cta:hover::before {
+            opacity: 1;
+        }
+
+        .btn-cta span {
+            position: relative;
+            z-index: 1;
+        }
+
+        /* ── Hero ────────────────────────────────────────────────────────────────── */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            padding-top: 56px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Animated gradient orbs */
+        .hero::before {
+            content: '';
+            position: absolute;
+            width: 800px;
+            height: 800px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(0, 232, 122, 0.07) 0%, transparent 70%);
+            top: -200px;
+            right: -200px;
+            animation: float 8s ease-in-out infinite;
+            pointer-events: none;
+        }
+
+        .hero::after {
+            content: '';
+            position: absolute;
+            width: 500px;
+            height: 500px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(0, 232, 122, 0.04) 0%, transparent 70%);
+            bottom: -100px;
+            left: -100px;
+            animation: float 10s ease-in-out infinite reverse;
+            pointer-events: none;
+        }
+
+        .hero-grid {
+            display: flex;
+            align-items: center;
+            gap: 48px;
+            width: 100%;
+            position: relative;
+            z-index: 1;
+        }
+
+        .hero-content {
+            flex: 0 0 55%;
+        }
+
+        .hero-decoration {
+            flex: 1;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 360px;
+            overflow: hidden;
+        }
+
+        /* Animated paw SVG */
+        .paw-mark {
+            position: relative;
+            width: 280px;
+            height: 280px;
+        }
+
+        .paw-mark .toe {
+            position: absolute;
+            font-size: 52px;
+            color: var(--green);
+            opacity: 0;
+            animation: rise 1.2s cubic-bezier(.16, 1, .3, 1) forwards;
+            filter: drop-shadow(0 0 20px rgba(0, 232, 122, 0.2));
+        }
+
+        .paw-mark .t1 {
+            left: 40px;
+            top: 20px;
+            animation-delay: 0.6s;
+        }
+
+        .paw-mark .t2 {
+            left: 115px;
+            top: 0px;
+            animation-delay: 0.75s;
+        }
+
+        .paw-mark .t3 {
+            left: 190px;
+            top: 20px;
+            animation-delay: 0.9s;
+        }
+
+        .paw-mark .pad {
+            position: absolute;
+            left: 85px;
+            top: 90px;
+            font-size: 100px;
+            opacity: 0;
+            animation: rise 1.2s cubic-bezier(.16, 1, .3, 1) 1.05s forwards;
+            filter: drop-shadow(0 0 30px rgba(0, 232, 122, 0.15));
+        }
+
+        /* Orbit ring around paw */
+        .paw-orbit {
+            position: absolute;
+            inset: -30px;
+            border: 1px solid rgba(0, 232, 122, 0.08);
+            border-radius: 50%;
+            animation: rotate 30s linear infinite;
+        }
+
+        .paw-orbit::after {
+            content: '';
+            position: absolute;
+            width: 6px;
+            height: 6px;
+            background: var(--green);
+            border-radius: 50%;
+            top: -3px;
+            left: 50%;
+            box-shadow: 0 0 12px var(--green);
+        }
+
+        /* Gradient headline */
+        h1 {
+            font-family: 'DM Serif Display', serif;
+            font-size: clamp(48px, 7vw, 80px);
+            line-height: 1.08;
+            font-weight: 400;
+            margin-bottom: 20px;
+        }
+
+        h1 .gradient-text {
+            background: linear-gradient(135deg, var(--text) 0%, var(--green) 50%, var(--text) 100%);
+            background-size: 200% auto;
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: shimmer 6s linear infinite;
+        }
+
+        .hero-sub {
+            font-family: 'DM Mono', monospace;
+            font-size: 16px;
+            color: var(--muted);
+            line-height: 1.8;
+            margin-bottom: 40px;
+        }
+
+        .hero-sub strong {
+            color: var(--text);
+            font-weight: 400;
+        }
+
+        /* ── Install Block ───────────────────────────────────────────────────────── */
+        .install-block {
+            background: var(--code-bg);
+            border: 1px solid #00e87a33;
+            border-radius: 8px;
+            padding: 20px 24px;
+            font-family: 'DM Mono', monospace;
+            font-size: 15px;
+            color: var(--text);
+            position: relative;
+            box-shadow: 0 0 40px #00e87a10, 0 20px 40px #00000060;
+            display: flex;
+            align-items: center;
+            gap: 0;
+            animation: pulse-glow 4s ease-in-out infinite;
+            transition: border-color 0.3s ease, transform 0.2s ease;
+        }
+
+        .install-block:hover {
+            border-color: #00e87a55;
+            transform: translateY(-2px);
+        }
+
+        .install-block .prompt {
+            color: var(--green);
+            margin-right: 12px;
+            flex-shrink: 0;
+        }
+
+        .install-block .cmd {
+            flex: 1;
+            white-space: nowrap;
+            overflow-x: auto;
+        }
+
+        .install-block .cursor-blink::after {
+            content: '█';
+            color: var(--green);
+            animation: blink 1.2s step-end infinite;
+            margin-left: 2px;
+        }
+
+        .copy-btn {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            font-family: 'DM Mono', monospace;
+            font-size: 11px;
+            letter-spacing: 0.05em;
+            color: var(--muted);
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border);
+            padding: 5px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            backdrop-filter: blur(4px);
+        }
+
+        .copy-btn:hover {
+            color: var(--green);
+            border-color: var(--green);
+            background: rgba(0, 232, 122, 0.06);
+        }
+
+        .copy-btn.copied {
+            color: var(--green);
+            border-color: var(--green);
+            background: rgba(0, 232, 122, 0.1);
+        }
+
+        /* ── Hero badges ─────────────────────────────────────────────────────────── */
+        .hero-badges {
+            display: flex;
+            gap: 16px;
+            margin-top: 24px;
+            flex-wrap: wrap;
+        }
+
+        .badge {
+            font-family: 'DM Mono', monospace;
+            font-size: 11px;
+            letter-spacing: 0.06em;
+            color: var(--muted);
+            border: 1px solid var(--border);
+            padding: 6px 14px;
+            border-radius: 100px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.3s ease;
+        }
+
+        .badge:hover {
+            border-color: var(--green);
+            color: var(--green);
+        }
+
+        .badge .dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--green);
+            box-shadow: 0 0 8px var(--green);
+            animation: blink 2s ease-in-out infinite;
+        }
+
+        /* ── Scroll Hint ─────────────────────────────────────────────────────────── */
+        .scroll-hint {
+            position: absolute;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            opacity: 0.3;
+            animation: bob 2.5s ease-in-out infinite;
+            transition: opacity 0.4s ease;
+        }
+
+        .scroll-hint svg {
+            width: 20px;
+            height: 20px;
+            stroke: var(--muted);
+            fill: none;
+        }
+
+        .scroll-hint span {
+            font-size: 10px;
+            color: var(--muted);
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+        }
+
+        /* ── Section spacing ─────────────────────────────────────────────────────── */
+        section {
+            padding: 120px 0;
+            position: relative;
+        }
+
+        .section-title {
+            font-family: 'DM Serif Display', serif;
+            font-size: 38px;
+            font-weight: 400;
+            color: var(--text);
+            margin-bottom: 60px;
+        }
+
+        .section-label {
+            font-family: 'DM Mono', monospace;
+            font-size: 10px;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+            color: var(--dim);
+            margin-bottom: 16px;
+        }
+
+        /* ── Features ────────────────────────────────────────────────────────────── */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 32px;
+        }
+
+        .feature-card {
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 32px 28px;
+            background: var(--surface);
+            transition: all 0.4s cubic-bezier(.16, 1, .3, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .feature-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--green), transparent);
+            opacity: 0;
+            transition: opacity 0.4s ease;
+        }
+
+        .feature-card:hover {
+            border-color: #00e87a33;
+            transform: translateY(-4px);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), 0 0 0 1px #00e87a22;
+        }
+
+        .feature-card:hover::before {
+            opacity: 1;
+        }
+
+        .feature-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            background: var(--green-glow);
+            border: 1px solid #00e87a22;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 24px;
+            font-size: 22px;
+            transition: all 0.3s ease;
+        }
+
+        .feature-card:hover .feature-icon {
+            box-shadow: 0 0 20px rgba(0, 232, 122, 0.15);
+            transform: scale(1.05);
+        }
+
+        .feature-number {
+            font-family: 'DM Mono', monospace;
+            font-size: 11px;
+            letter-spacing: 0.15em;
+            color: var(--dim);
+            margin-bottom: 20px;
+        }
+
+        .feature-title {
+            font-family: 'DM Serif Display', serif;
+            font-size: 24px;
+            color: var(--text);
+            margin-bottom: 12px;
+            font-weight: 400;
+        }
+
+        .feature-body {
+            font-family: 'DM Mono', monospace;
+            font-size: 13px;
+            color: var(--muted);
+            line-height: 1.7;
+        }
+
+        /* ── Install Methods ─────────────────────────────────────────────────────── */
+        .install-methods-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin-bottom: 32px;
+        }
+
+        .method-card {
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 24px 20px;
+            position: relative;
+            transition: all 0.3s cubic-bezier(.16, 1, .3, 1);
+        }
+
+        .method-card:hover {
+            border-color: #00e87a33;
+            transform: translateY(-2px);
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        .method-card.recommended {
+            border-color: #00e87a33;
+            background: linear-gradient(180deg, rgba(0, 232, 122, 0.04) 0%, var(--code-bg) 100%);
+        }
+
+        .method-label {
+            font-family: 'DM Mono', monospace;
+            font-size: 10px;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            color: var(--dim);
+            margin-bottom: 16px;
+        }
+
+        .method-label.is-recommended {
+            color: var(--green);
+        }
+
+        .method-code {
+            font-family: 'DM Mono', monospace;
+            font-size: 13px;
+            color: var(--text);
+            line-height: 1.7;
+            word-break: break-all;
+        }
+
+        .method-code .prompt {
+            color: var(--green);
+        }
+
+        .pip-row {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            font-family: 'DM Mono', monospace;
+            font-size: 13px;
+            color: var(--muted);
+            margin-top: 16px;
+            padding: 16px 20px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: var(--surface);
+        }
+
+        .pip-row code {
+            color: var(--text);
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            padding: 6px 14px;
+            border-radius: 6px;
+        }
+
+        /* ── Terminal Demo ───────────────────────────────────────────────────────── */
+        .terminal-section {
+            position: relative;
+        }
+
+        .terminal-section::before {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 400px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: radial-gradient(ellipse at center, rgba(0, 232, 122, 0.04) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        .terminal-window {
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 40px 80px #00000080, 0 0 0 1px rgba(255, 255, 255, 0.03);
+            max-width: 620px;
+            margin: 0 auto;
+            position: relative;
+            z-index: 1;
+            transition: all 0.4s ease;
+        }
+
+        .terminal-window:hover {
+            box-shadow: 0 50px 100px #00000090, 0 0 60px rgba(0, 232, 122, 0.06);
+            transform: translateY(-2px);
+        }
+
+        .terminal-titlebar {
+            background: #141414;
+            padding: 14px 18px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .traffic-light {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            transition: transform 0.2s ease;
+        }
+
+        .traffic-light:hover {
+            transform: scale(1.2);
+        }
+
+        .tl-red {
+            background: #ff5f57;
+            box-shadow: 0 0 6px #ff5f5744;
+        }
+
+        .tl-yellow {
+            background: #febc2e;
+            box-shadow: 0 0 6px #febc2e44;
+        }
+
+        .tl-green {
+            background: #28c840;
+            box-shadow: 0 0 6px #28c84044;
+        }
+
+        .terminal-title {
+            margin-left: 8px;
+            font-family: 'DM Mono', monospace;
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .terminal-body {
+            padding: 24px 24px;
+            font-family: 'DM Mono', monospace;
+            font-size: 13px;
+            line-height: 1.8;
+            min-height: 340px;
+        }
+
+        .line-prompt {
+            color: var(--muted);
+        }
+
+        .line-user {
+            color: var(--text);
+        }
+
+        .line-bot {
+            color: var(--green);
+        }
+
+        .cursor::after {
+            content: '█';
+            color: var(--green);
+            animation: blink 1.2s step-end infinite;
+        }
+
+        /* ── Divider ─────────────────────────────────────────────────────────────── */
+        .section-divider {
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--border), transparent);
+            margin: 0 auto;
+            max-width: 400px;
+        }
+
+        /* ── Requirements ────────────────────────────────────────────────────────── */
+        .requirements-section {
+            padding-top: 80px;
+        }
+
+        .requirements-wrap {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 36px 32px;
+        }
+
+        .requirements-header {
+            font-family: 'DM Mono', monospace;
+            font-size: 10px;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+            color: var(--dim);
+            margin-bottom: 24px;
+        }
+
+        .requirements-table {
+            width: 100%;
+            font-family: 'DM Mono', monospace;
+            font-size: 13px;
+            border-collapse: collapse;
+        }
+
+        .requirements-table tr {
+            border-bottom: 1px solid var(--border);
+            transition: background 0.2s ease;
+        }
+
+        .requirements-table tr:hover {
+            background: rgba(0, 232, 122, 0.02);
+        }
+
+        .requirements-table tr:last-child {
+            border-bottom: none;
+        }
+
+        .requirements-table td {
+            padding: 16px 0;
+        }
+
+        .requirements-table td:first-child {
+            color: var(--muted);
+            width: 140px;
+        }
+
+        .requirements-table td:last-child {
+            color: var(--text);
+        }
+
+        .requirements-note {
+            font-family: 'DM Mono', monospace;
+            font-size: 13px;
+            color: var(--green);
+            margin-top: 24px;
+            opacity: 0.7;
+        }
+
+        /* ── Final CTA ───────────────────────────────────────────────────────────── */
+        .cta-section {
+            padding: 160px 0 120px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .cta-section::before {
+            content: '';
+            position: absolute;
+            width: 600px;
+            height: 600px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(0, 232, 122, 0.06) 0%, transparent 70%);
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+
+        .cta-paw {
+            font-size: 56px;
+            margin-bottom: 28px;
+            display: inline-block;
+            animation: float 4s ease-in-out infinite;
+            filter: drop-shadow(0 0 20px rgba(0, 232, 122, 0.2));
+        }
+
+        .cta-heading {
+            font-family: 'DM Serif Display', serif;
+            font-size: clamp(36px, 5vw, 52px);
+            font-weight: 400;
+            color: var(--text);
+            margin-bottom: 40px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .cta-install {
+            max-width: 520px;
+            margin: 0 auto 36px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .cta-buttons {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            margin-bottom: 56px;
+            flex-wrap: wrap;
+            position: relative;
+            z-index: 1;
+        }
+
+        .btn-outline {
+            font-family: 'DM Mono', monospace;
+            font-size: 13px;
+            border: 1px solid var(--border);
+            color: var(--muted);
+            background: transparent;
+            padding: 10px 22px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(.16, 1, .3, 1);
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-outline:hover {
+            color: var(--text);
+            border-color: var(--text);
+            opacity: 1;
+            transform: translateY(-1px);
+        }
+
+        .cta-divider {
+            width: 400px;
+            max-width: 80%;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--border), transparent);
+            margin: 0 auto 28px;
+        }
+
+        .cta-meta {
+            font-family: 'DM Mono', monospace;
+            font-size: 12px;
+            color: var(--muted);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            flex-wrap: wrap;
+            position: relative;
+            z-index: 1;
+        }
+
+        .cta-meta span {
+            opacity: 0.4;
+        }
+
+        /* ── Footer ──────────────────────────────────────────────────────────────── */
+        .site-footer {
+            border-top: 1px solid var(--border);
+            padding: 36px 0;
+        }
+
+        .footer-inner {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            font-family: 'DM Mono', monospace;
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .footer-brand {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .footer-brand-name {
+            font-weight: 500;
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .footer-links {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .footer-links a {
+            color: var(--muted);
+            transition: color 0.2s ease;
+        }
+
+        .footer-links a:hover {
+            color: var(--green);
+            opacity: 1;
+        }
+
+        /* ── Mobile ──────────────────────────────────────────────────────────────── */
+        @media (max-width: 680px) {
+            .hero-grid {
+                flex-direction: column;
+            }
+
+            .hero-content {
+                flex: unset;
+            }
+
+            .hero-decoration {
+                display: none;
+            }
+
+            .install-methods-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .features-grid {
+                grid-template-columns: 1fr;
+                gap: 20px;
+            }
+
+            h1 {
+                font-size: clamp(36px, 10vw, 56px);
+            }
+
+            section {
+                padding: 80px 0;
+            }
+
+            .cta-section {
+                padding: 100px 0 80px;
+            }
+
+            .footer-inner {
+                flex-direction: column;
+                gap: 20px;
+            }
+
+            .install-block {
+                font-size: 13px;
+                padding: 16px 18px;
+            }
+
+            .install-block .cmd {
+                font-size: 12px;
+            }
+
+            .hero-badges {
+                gap: 10px;
+            }
+
+            .cursor-glow {
+                display: none;
+            }
+
+            .requirements-wrap {
+                padding: 24px 20px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Cursor spotlight -->
+    <div class="cursor-glow" id="cursorGlow"></div>
+
+    <!-- ── HEADER ────────────────────────────────────────────────────────────── -->
+    <header class="site-header" id="header">
+        <div class="header-inner">
+            <div class="logo">
+                <span class="logo-emoji">🐾</span>
+                <span>PAWBOT</span>
+            </div>
+            <a href="#cta" class="btn-cta"><span>Get Started →</span></a>
+        </div>
+    </header>
+
+    <!-- ── HERO ──────────────────────────────────────────────────────────────── -->
+    <section class="hero" id="hero">
+        <div class="container">
+            <div class="hero-grid">
+                <div class="hero-content">
+                    <h1 class="hero-headline">Your personal<br><span class="gradient-text">AI assistant.</span></h1>
+                    <p class="hero-sub">Lives on <strong>your machine</strong>.<br>Talks on <strong>every
+                            device</strong>.</p>
+                    <div class="install-block hero-terminal" id="hero-install">
+                        <span class="prompt">$</span>
+                        <span class="cmd">curl -fsSL pawbot.thecloso.com/install | bash<span
+                                class="cursor-blink"></span></span>
+                        <button class="copy-btn" data-copy="curl -fsSL pawbot.thecloso.com/install | bash"
+                            onclick="copyCommand(this)">Copy</button>
+                    </div>
+                    <div class="hero-badges">
+                        <div class="badge"><span class="dot"></span> Open Source</div>
+                        <div class="badge">MIT License</div>
+                        <div class="badge">Runs Locally</div>
+                    </div>
+                </div>
+                <div class="hero-decoration">
+                    <div class="paw-mark" aria-hidden="true">
+                        <span class="toe t1">●</span>
+                        <span class="toe t2">●</span>
+                        <span class="toe t3">●</span>
+                        <span class="pad">🐾</span>
+                        <div class="paw-orbit"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="scroll-hint" id="scrollHint" aria-hidden="true">
+            <svg viewBox="0 0 24 24" stroke-width="1.5" stroke-linecap="round">
+                <path d="M12 5v14m0 0l-6-6m6 6l6-6" />
+            </svg>
+            <span>scroll</span>
+        </div>
+    </section>
+
+    <!-- ── WHAT IT DOES ──────────────────────────────────────────────────────── -->
+    <section id="features">
+        <div class="container">
+            <div class="features-grid reveal reveal-stagger">
+                <div class="feature-card">
+                    <div class="feature-icon">🔒</div>
+                    <div class="feature-number">01</div>
+                    <div class="feature-title">Runs on your machine.</div>
+                    <div class="feature-body">Your data never leaves. No cloud. No subscriptions. Full control, always.
+                    </div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🔗</div>
+                    <div class="feature-number">02</div>
+                    <div class="feature-title">Connects your channels.</div>
+                    <div class="feature-body">Telegram, WhatsApp, Email — one command to connect. Talk to Pawbot from
+                        anywhere.</div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🧠</div>
+                    <div class="feature-number">03</div>
+                    <div class="feature-title">Remembers everything.</div>
+                    <div class="feature-body">Memory that grows with every conversation. Context that compounds over
+                        time.</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="section-divider"></div>
+
+    <!-- ── THREE WAYS TO INSTALL ─────────────────────────────────────────────── -->
+    <section id="install">
+        <div class="container">
+            <div class="section-label reveal">INSTALLATION</div>
+            <h2 class="section-title reveal">Three ways in.</h2>
+            <div class="install-methods-grid reveal reveal-stagger">
+                <div class="method-card recommended">
+                    <div class="method-label is-recommended">RECOMMENDED</div>
+                    <div class="method-code"><span class="prompt">$</span> curl -fsSL pawbot.thecloso.com/install | bash
+                    </div>
+                    <button class="copy-btn" data-copy="curl -fsSL pawbot.thecloso.com/install | bash"
+                        onclick="copyCommand(this)">Copy</button>
+                </div>
+                <div class="method-card">
+                    <div class="method-label">GITHUB DIRECT</div>
+                    <div class="method-code"><span class="prompt">$</span> curl -fsSL
+                        raw.githubusercontent.com/AiWaldoh/pawbot/main/install/setup.sh | bash</div>
+                    <button class="copy-btn"
+                        data-copy="curl -fsSL raw.githubusercontent.com/AiWaldoh/pawbot/main/install/setup.sh | bash"
+                        onclick="copyCommand(this)">Copy</button>
+                </div>
+                <div class="method-card">
+                    <div class="method-label">INSPECT FIRST</div>
+                    <div class="method-code"><span class="prompt">$</span> git clone
+                        https://github.com/AiWaldoh/pawbot<br><span class="prompt">$</span> bash pawbot/install/setup.sh
+                    </div>
+                    <button class="copy-btn"
+                        data-copy="git clone https://github.com/AiWaldoh/pawbot && bash pawbot/install/setup.sh"
+                        onclick="copyCommand(this)">Copy</button>
+                </div>
+            </div>
+            <div class="pip-row reveal">
+                <span>Also available:</span>
+                <code>pip install pawbot-ai</code>
+                <button class="copy-btn" style="position:relative;top:0;right:0;" data-copy="pip install pawbot-ai"
+                    onclick="copyCommand(this)">Copy</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── TERMINAL DEMO ─────────────────────────────────────────────────────── -->
+    <section class="terminal-section" id="demo">
+        <div class="container">
+            <div class="terminal-window reveal" id="terminal-demo">
+                <div class="terminal-titlebar">
+                    <div class="traffic-light tl-red"></div>
+                    <div class="traffic-light tl-yellow"></div>
+                    <div class="traffic-light tl-green"></div>
+                    <span class="terminal-title">pawbot</span>
+                </div>
+                <div class="terminal-body" id="terminal-body"></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── REQUIREMENTS ──────────────────────────────────────────────────────── -->
+    <section class="requirements-section" id="requirements">
+        <div class="container reveal">
+            <div class="requirements-wrap">
+                <div class="requirements-header">REQUIRES</div>
+                <table class="requirements-table">
+                    <tr>
+                        <td>Python</td>
+                        <td>3.11 or higher</td>
+                    </tr>
+                    <tr>
+                        <td>Platform</td>
+                        <td>macOS · Linux · Windows (WSL)</td>
+                    </tr>
+                    <tr>
+                        <td>API key</td>
+                        <td>OpenRouter (free) · Anthropic · OpenAI</td>
+                    </tr>
+                    <tr>
+                        <td>Node.js</td>
+                        <td>18+ (only for WhatsApp channel)</td>
+                    </tr>
+                </table>
+                <p class="requirements-note">That's it.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── FINAL CTA ─────────────────────────────────────────────────────────── -->
+    <section class="cta-section reveal" id="cta">
+        <div class="container">
+            <div class="cta-paw">🐾</div>
+            <h2 class="cta-heading">Ready to start?</h2>
+            <div class="cta-install">
+                <div class="install-block" style="animation:none;">
+                    <span class="prompt">$</span>
+                    <span class="cmd">curl -fsSL pawbot.thecloso.com/install | bash</span>
+                    <button class="copy-btn" data-copy="curl -fsSL pawbot.thecloso.com/install | bash"
+                        onclick="copyCommand(this)">Copy</button>
+                </div>
+            </div>
+            <div class="cta-buttons">
+                <button class="btn-cta" onclick="copyCommand(this)"
+                    data-copy="curl -fsSL pawbot.thecloso.com/install | bash"><span>Copy install command</span></button>
+                <a href="https://github.com/AiWaldoh/pawbot" class="btn-outline" target="_blank" rel="noopener">View on
+                    GitHub →</a>
+            </div>
+            <div class="cta-divider"></div>
+            <div class="cta-meta">
+                MIT License <span>·</span> Built for developers <span>·</span> Runs locally
+            </div>
+        </div>
+    </section>
+
+    <!-- ── FOOTER ────────────────────────────────────────────────────────────── -->
+    <footer class="site-footer">
+        <div class="container">
+            <div class="footer-inner">
+                <div class="footer-brand">
+                    <div class="footer-brand-name">🐾 PAWBOT</div>
+                    <a href="https://pawbot.thecloso.com">pawbot.thecloso.com</a>
+                    <a href="https://github.com/AiWaldoh/pawbot">github.com/AiWaldoh/pawbot</a>
+                </div>
+                <div class="footer-links">
+                    <a href="https://github.com/AiWaldoh/pawbot">GitHub</a>
+                    <a href="https://github.com/AiWaldoh/pawbot#readme">Docs</a>
+                    <span style="color:var(--dim)">MIT License</span>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- ── SCRIPTS ───────────────────────────────────────────────────────────── -->
+    <script>
+        // ── Cursor spotlight follow ───────────────────────────────────────────────
+        const glow = document.getElementById('cursorGlow');
+        let glowX = -600, glowY = -600;
+        let mouseX = -600, mouseY = -600;
+        document.addEventListener('mousemove', e => {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+        });
+        function animateGlow() {
+            glowX += (mouseX - glowX) * 0.08;
+            glowY += (mouseY - glowY) * 0.08;
+            glow.style.left = glowX + 'px';
+            glow.style.top = glowY + 'px';
+            requestAnimationFrame(animateGlow);
+        }
+        animateGlow();
+
+        // ── Copy to clipboard ─────────────────────────────────────────────────────
+        function copyCommand(btn) {
+            const text = btn.getAttribute('data-copy');
+            if (!text) return;
+            navigator.clipboard.writeText(text).then(() => {
+                showCopied(btn);
+            }).catch(() => {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.cssText = 'position:fixed;left:-9999px';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                showCopied(btn);
+            });
+        }
+        function showCopied(btn) {
+            const original = btn.textContent;
+            btn.textContent = 'Copied ✓';
+            btn.classList.add('copied');
+            setTimeout(() => {
+                btn.textContent = original;
+                btn.classList.remove('copied');
+            }, 2000);
+        }
+
+        // ── Scroll reveal ─────────────────────────────────────────────────────────
+        const revealObserver = new IntersectionObserver(
+            entries => entries.forEach(e => {
+                if (e.isIntersecting) {
+                    e.target.classList.add('visible');
+                    revealObserver.unobserve(e.target);
+                }
+            }),
+            { threshold: 0.08 }
+        );
+        document.querySelectorAll('.reveal').forEach(el => revealObserver.observe(el));
+
+        // ── Terminal typewriter ───────────────────────────────────────────────────
+        const termLines = [
+            { cls: 'line-prompt', text: '$ pawbot agent' },
+            { cls: '', text: '' },
+            { cls: 'line-user', text: '> what\'s on my calendar today?' },
+            { cls: 'line-bot', text: '🐾 You have 3 meetings. Standup at 10am,' },
+            { cls: 'line-bot', text: '   design review at 2pm, team sync at 4pm.' },
+            { cls: 'line-bot', text: '   Want me to set reminders?' },
+            { cls: '', text: '' },
+            { cls: 'line-user', text: '> yes, 15 minutes before each' },
+            { cls: 'line-bot', text: '🐾 Done. 3 reminders set. Also — there\'s an' },
+            { cls: 'line-bot', text: '   unread PR from yesterday: "review PR #47".' },
+            { cls: 'line-bot', text: '   Add it to today\'s list?' },
+            { cls: '', text: '' },
+            { cls: 'line-user', text: '> yes' },
+            { cls: 'line-bot', text: '🐾 Added. Good morning. ☀️' },
+        ];
+
+        function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+        let terminalPlayed = false;
+        async function typeTerminal(container) {
+            if (terminalPlayed) return;
+            terminalPlayed = true;
+            for (const line of termLines) {
+                const el = document.createElement('div');
+                el.className = line.cls;
+                container.appendChild(el);
+                if (line.text === '') {
+                    el.innerHTML = '&nbsp;';
+                    await sleep(100);
+                    continue;
+                }
+                for (const char of line.text) {
+                    el.textContent += char;
+                    await sleep(28 + Math.random() * 18);
+                }
+                await sleep(200);
+            }
+            const cursor = document.createElement('div');
+            cursor.className = 'line-user cursor';
+            cursor.textContent = '> ';
+            container.appendChild(cursor);
+        }
+
+        const terminalObserver = new IntersectionObserver(entries => {
+            entries.forEach(e => {
+                if (e.isIntersecting) {
+                    typeTerminal(document.getElementById('terminal-body'));
+                    terminalObserver.unobserve(e.target);
+                }
+            });
+        }, { threshold: 0.3 });
+        terminalObserver.observe(document.getElementById('terminal-demo'));
+
+        // ── Hide scroll hint on scroll ────────────────────────────────────────────
+        const scrollHint = document.getElementById('scrollHint');
+        if (scrollHint) {
+            let hidden = false;
+            window.addEventListener('scroll', () => {
+                if (!hidden && window.scrollY > 80) {
+                    scrollHint.style.opacity = '0';
+                    hidden = true;
+                }
+            }, { passive: true });
+        }
+
+        // ── Parallax header opacity ───────────────────────────────────────────────
+        const header = document.getElementById('header');
+        window.addEventListener('scroll', () => {
+            const scrolled = window.scrollY > 20;
+            header.style.borderBottomColor = scrolled ? 'var(--border)' : 'transparent';
+        }, { passive: true });
+    </script>
+
+</body>
+
+</html>

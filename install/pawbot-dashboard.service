@@ -1,0 +1,21 @@
+[Unit]
+Description=Pawbot Dashboard
+Documentation=https://pawbot.thecloso.com/docs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/pawbot
+ExecStart=/home/ubuntu/.local/bin/pawbot dashboard --host 127.0.0.1 --port 4000 --no-browser
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pawbot-dashboard
+Environment=HOME=/home/ubuntu
+Environment=PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=multi-user.target
