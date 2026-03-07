@@ -143,14 +143,42 @@ class TelegramChannel(BaseChannel):
         self._media_group_buffers: dict[str, dict] = {}
         self._media_group_tasks: dict[str, asyncio.Task] = {}
 
+        # Phase 4: Reconnection state
+        self._reconnect_delay = 1  # Start at 1 second
+        self._max_reconnect_delay = getattr(config, 'max_reconnect_delay', 300)
+        self._reconnect_count = 0
+        self._auto_reconnect = getattr(config, 'auto_reconnect', True)
+
     async def start(self) -> None:
-        """Start the Telegram bot with long polling."""
+        """Start the Telegram bot with auto-reconnect (Phase 4)."""
         if not self.config.token:
             logger.error("Telegram bot token not configured")
             return
 
         self._running = True
 
+        while self._running:
+            try:
+                self._reconnect_delay = 1  # Reset on successful start
+                await self._run_polling()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                if not self._running or not self._auto_reconnect:
+                    break
+                self._reconnect_count += 1
+                logger.warning(
+                    "Telegram disconnected (attempt {}): {} — reconnecting in {}s",
+                    self._reconnect_count, e, self._reconnect_delay,
+                )
+                await asyncio.sleep(self._reconnect_delay)
+                self._reconnect_delay = min(
+                    self._reconnect_delay * 2,
+                    self._max_reconnect_delay,
+                )
+
+    async def _run_polling(self) -> None:
+        """Run the Telegram polling loop (extracted for reconnect support)."""
         # Build the application with larger connection pool to avoid pool-timeout on long runs
         req = HTTPXRequest(connection_pool_size=16, pool_timeout=5.0, connect_timeout=30.0, read_timeout=30.0)
         builder = Application.builder().token(self.config.token).request(req).get_updates_request(req)

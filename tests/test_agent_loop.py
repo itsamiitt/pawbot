@@ -174,9 +174,9 @@ class TestComplexityClassifier:
         assert "system_1" in SYSTEM_PATHS
         assert "system_1_5" in SYSTEM_PATHS
         assert "system_2" in SYSTEM_PATHS
-        assert SYSTEM_PATHS["system_1"]["max_iterations"] == 5
-        assert SYSTEM_PATHS["system_1_5"]["max_iterations"] == 15
-        assert SYSTEM_PATHS["system_2"]["max_iterations"] == 50
+        assert SYSTEM_PATHS["system_1"]["max_iterations"] == 20
+        assert SYSTEM_PATHS["system_1_5"]["max_iterations"] == 40
+        assert SYSTEM_PATHS["system_2"]["max_iterations"] == 100
         assert SYSTEM_PATHS["system_2"]["use_tree_of_thoughts"] is True
         assert SYSTEM_PATHS["system_2"]["pre_task_reflection"] is True
 

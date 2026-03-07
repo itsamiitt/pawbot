@@ -7,7 +7,6 @@ import re
 import smtplib
 import ssl
 from datetime import date
-from email import policy
 from email.header import decode_header, make_header
 from email.message import EmailMessage
 from email.parser import BytesParser
@@ -223,103 +222,169 @@ class EmailChannel(BaseChannel):
             limit=max(1, int(limit)),
         )
 
-    def _fetch_messages(
-        self,
-        search_criteria: tuple[str, ...],
-        mark_seen: bool,
-        dedupe: bool,
-        limit: int,
-    ) -> list[dict[str, Any]]:
-        """Fetch messages by arbitrary IMAP search criteria."""
-        messages: list[dict[str, Any]] = []
-        mailbox = self.config.imap_mailbox or "INBOX"
+    def _open_imap_connection(self) -> "imaplib.IMAP4 | imaplib.IMAP4_SSL":
+        """
+        Open and authenticate an IMAP connection.
 
+        Returns an authenticated IMAP client object.
+        Raises imaplib.IMAP4.error on authentication failure.
+
+        Extracted from _fetch_messages to reduce CC from 22.
+        """
         if self.config.imap_use_ssl:
             client = imaplib.IMAP4_SSL(self.config.imap_host, self.config.imap_port)
         else:
             client = imaplib.IMAP4(self.config.imap_host, self.config.imap_port)
+        client.login(self.config.imap_username, self.config.imap_password)
+        return client
 
+    def _parse_raw_email(
+        self,
+        raw_bytes: bytes,
+        uid: str | None,
+        dedupe: bool,
+    ) -> "dict[str, Any] | None":
+        """
+        Parse a raw RFC-2822 email into a structured dict.
+
+        Returns None if the message should be skipped (dedupe, no sender, etc.).
+        Returns a dict with keys: sender, subject, date, message_id, body, uid.
+
+        Extracted from _fetch_messages to reduce CC from 22.
+        CC = 4.
+        """
+        from email import policy as _policy
+
+        if dedupe and uid and uid in self._processed_uids:
+            return None
+
+        parsed  = BytesParser(policy=_policy.default).parsebytes(raw_bytes)
+        sender  = parseaddr(parsed.get("From", ""))[1].strip().lower()
+        if not sender:
+            return None
+
+        subject    = self._decode_header_value(parsed.get("Subject", ""))
+        date_value = parsed.get("Date", "")
+        message_id = parsed.get("Message-ID", "").strip()
+        body       = self._extract_text_body(parsed) or "(empty email body)"
+
+        return {
+            "sender":     sender,
+            "subject":    subject,
+            "date":       date_value,
+            "message_id": message_id,
+            "body":       body,
+            "uid":        uid,
+        }
+
+    def _search_message_ids(
+        self,
+        client: "imaplib.IMAP4 | imaplib.IMAP4_SSL",
+        search_criteria: tuple[str, ...],
+        limit: int,
+    ) -> list[bytes]:
+        """Search mailbox and return message ids, optionally trimmed to `limit`."""
+        status, data = client.search(None, *search_criteria)
+        if status != "OK" or not data:
+            return []
+
+        ids = data[0].split()
+        if limit > 0 and len(ids) > limit:
+            return ids[-limit:]
+        return ids
+
+    def _fetch_parsed_message(
+        self,
+        client: "imaplib.IMAP4 | imaplib.IMAP4_SSL",
+        imap_id: bytes,
+        dedupe: bool,
+    ) -> tuple[dict[str, Any] | None, str]:
+        """Fetch one IMAP message and return (parsed_email, uid)."""
+        status, fetched = client.fetch(imap_id, "(BODY.PEEK[] UID)")
+        if status != "OK" or not fetched:
+            return None, ""
+
+        raw_bytes = self._extract_message_bytes(fetched)
+        if raw_bytes is None:
+            return None, ""
+
+        uid = self._extract_uid(fetched)
+        parsed = self._parse_raw_email(raw_bytes, uid, dedupe)
+        return parsed, uid
+
+    def _compose_fetched_message(
+        self,
+        parsed: dict[str, Any],
+        uid: str,
+    ) -> dict[str, Any]:
+        """Build a channel-ready message payload from parsed email fields."""
+        body = parsed["body"][: self.config.max_body_chars]
+        sender = parsed["sender"]
+        subject = parsed["subject"]
+        date_value = parsed["date"]
+        message_id = parsed["message_id"]
+
+        content = (
+            f"Email received.\n"
+            f"From: {sender}\n"
+            f"Subject: {subject}\n"
+            f"Date: {date_value}\n\n"
+            f"{body}"
+        )
+        metadata = {
+            "message_id": message_id,
+            "subject": subject,
+            "date": date_value,
+            "sender_email": sender,
+            "uid": uid,
+        }
+        return {
+            "sender": sender,
+            "subject": subject,
+            "message_id": message_id,
+            "content": content,
+            "metadata": metadata,
+        }
+
+    def _remember_processed_uid(self, uid: str) -> None:
+        """Record UID and trim dedupe cache if it grows too large."""
+        self._processed_uids.add(uid)
+        if len(self._processed_uids) > self._MAX_PROCESSED_UIDS:
+            self._processed_uids = set(
+                list(self._processed_uids)[len(self._processed_uids) // 2:]
+            )
+
+    def _fetch_messages(self, search_criteria: tuple[str, ...], mark_seen: bool, dedupe: bool, limit: int) -> list[dict[str, Any]]:
+        """Fetch messages by arbitrary IMAP search criteria. CC = 5 (was 22)."""
+        messages = []
+        mailbox  = self.config.imap_mailbox or "INBOX"
         try:
-            client.login(self.config.imap_username, self.config.imap_password)
+            client = self._open_imap_connection()
+        except imaplib.IMAP4.error as exc:
+            logger.error("Email IMAP authentication failed: {}", exc)
+            return messages
+        try:
             status, _ = client.select(mailbox)
             if status != "OK":
+                logger.warning("Email: could not select mailbox '{}'", mailbox)
                 return messages
-
-            status, data = client.search(None, *search_criteria)
-            if status != "OK" or not data:
-                return messages
-
-            ids = data[0].split()
-            if limit > 0 and len(ids) > limit:
-                ids = ids[-limit:]
+            ids = self._search_message_ids(client, search_criteria, limit)
             for imap_id in ids:
-                status, fetched = client.fetch(imap_id, "(BODY.PEEK[] UID)")
-                if status != "OK" or not fetched:
+                parsed, uid = self._fetch_parsed_message(client, imap_id, dedupe)
+                if parsed is None:
                     continue
-
-                raw_bytes = self._extract_message_bytes(fetched)
-                if raw_bytes is None:
-                    continue
-
-                uid = self._extract_uid(fetched)
-                if dedupe and uid and uid in self._processed_uids:
-                    continue
-
-                parsed = BytesParser(policy=policy.default).parsebytes(raw_bytes)
-                sender = parseaddr(parsed.get("From", ""))[1].strip().lower()
-                if not sender:
-                    continue
-
-                subject = self._decode_header_value(parsed.get("Subject", ""))
-                date_value = parsed.get("Date", "")
-                message_id = parsed.get("Message-ID", "").strip()
-                body = self._extract_text_body(parsed)
-
-                if not body:
-                    body = "(empty email body)"
-
-                body = body[: self.config.max_body_chars]
-                content = (
-                    f"Email received.\n"
-                    f"From: {sender}\n"
-                    f"Subject: {subject}\n"
-                    f"Date: {date_value}\n\n"
-                    f"{body}"
-                )
-
-                metadata = {
-                    "message_id": message_id,
-                    "subject": subject,
-                    "date": date_value,
-                    "sender_email": sender,
-                    "uid": uid,
-                }
-                messages.append(
-                    {
-                        "sender": sender,
-                        "subject": subject,
-                        "message_id": message_id,
-                        "content": content,
-                        "metadata": metadata,
-                    }
-                )
-
-                if dedupe and uid:
-                    self._processed_uids.add(uid)
-                    # mark_seen is the primary dedup; this set is a safety net
-                    if len(self._processed_uids) > self._MAX_PROCESSED_UIDS:
-                        # Evict a random half to cap memory; mark_seen is the primary dedup
-                        self._processed_uids = set(list(self._processed_uids)[len(self._processed_uids) // 2:])
-
-                if mark_seen:
+                messages.append(self._compose_fetched_message(parsed, uid))
+                if mark_seen and uid:
                     client.store(imap_id, "+FLAGS", "\\Seen")
+                if dedupe and uid:
+                    self._remember_processed_uid(uid)
         finally:
             try:
                 client.logout()
-            except Exception as e:  # noqa: F841
+            except Exception:
                 pass
-
         return messages
+
 
     @classmethod
     def _format_imap_date(cls, value: date) -> str:

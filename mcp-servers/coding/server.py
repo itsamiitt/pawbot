@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -98,7 +99,7 @@ def _truncate(text: str | None, limit: int) -> str:
 
 
 def _get_project_hash(project_path: str) -> str:
-    return hashlib.md5(project_path.encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha256(project_path.encode("utf-8")).hexdigest()[:12]
 
 
 def _init_index_db(db_path: str) -> None:
@@ -242,12 +243,13 @@ def _run_subprocess(
         return {"ok": False, "error": str(exc), "returncode": -1}
 
 
-def _run_shell(cmd: str, cwd: str | None = None, timeout: int = 30) -> dict[str, Any]:
+def _run_shell(cmd: str | list[str], cwd: str | None = None, timeout: int = 30) -> dict[str, Any]:
+    argv = cmd if isinstance(cmd, list) else shlex.split(cmd)
     try:
         result = subprocess.run(
-            cmd,
+            argv,
             cwd=cwd,
-            shell=True,
+            shell=False,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -520,6 +522,113 @@ def code_get_dependencies(file_path: str, project_path: str = "") -> dict[str, A
     }
 
 
+def _search_keyword_mode(query: str, root: str) -> list[dict[str, Any]]:
+    """Search source files via ripgrep with Python fallback."""
+    rg_cmd = [
+        "rg",
+        "-n",
+        "--glob",
+        "*.py",
+        "--glob",
+        "*.js",
+        "--glob",
+        "*.ts",
+        "--glob",
+        "*.jsx",
+        "--glob",
+        "*.tsx",
+        query,
+        root,
+    ]
+    rg = _run_subprocess(rg_cmd, timeout=30)
+    if rg.get("ok"):
+        results: list[dict[str, Any]] = []
+        for line in (rg.get("stdout", "") or "").splitlines()[:40]:
+            parts = line.rsplit(":", 2)
+            if len(parts) < 3:
+                continue
+            results.append(
+                {
+                    "file_path": parts[0],
+                    "line_number": int(parts[1]) if parts[1].isdigit() else 0,
+                    "snippet": parts[2][:200],
+                    "match_type": "keyword",
+                }
+            )
+        return results
+    return _search_keyword_fallback(query, root)
+
+
+def _search_symbol_mode(query: str, root: str) -> list[dict[str, Any]] | dict[str, Any]:
+    """Search indexed symbols from the per-project SQLite DB."""
+    db_path = os.path.join(INDEX_DIR, f"{_get_project_hash(root)}.db")
+    if not os.path.exists(db_path):
+        return {"error": f"No index for {root}. Run code_index_project first."}
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT file_path, symbol_type, symbol_name, line_number "
+            "FROM symbols WHERE symbol_name LIKE ? LIMIT 20",
+            (f"%{query}%",),
+        ).fetchall()
+
+    return [
+        {
+            "file_path": row[0],
+            "line_number": row[3],
+            "snippet": f"{row[1]}: {row[2]}",
+            "match_type": "symbol",
+        }
+        for row in rows
+    ]
+
+
+def _search_error_mode(query: str, root: str) -> list[dict[str, Any]]:
+    """Search log/text files for error patterns and query text."""
+    patterns = [query, "Error:", "Exception:", "Traceback", "FAILED"]
+    seen_files: set[str] = set()
+    results: list[dict[str, Any]] = []
+
+    for pattern in patterns[:2]:
+        for root_dir, dirs, files in os.walk(root):
+            dirs[:] = [name for name in dirs if name not in SKIP_DIRS]
+            for name in files:
+                if Path(name).suffix.lower() not in {".log", ".txt"}:
+                    continue
+                path = os.path.join(root_dir, name)
+                if path in seen_files:
+                    continue
+                seen_files.add(path)
+                try:
+                    with open(path, encoding="utf-8", errors="replace") as handle:
+                        for line_no, line in enumerate(handle, start=1):
+                            if pattern.lower() in line.lower():
+                                results.append(
+                                    {
+                                        "file_path": path,
+                                        "line_number": line_no,
+                                        "snippet": line.strip()[:200],
+                                        "match_type": "error",
+                                    }
+                                )
+                                if len(results) >= 20:
+                                    return results
+                except OSError:
+                    continue
+    return results
+
+
+_SEARCH_MODE_ALIASES: dict[str, str] = {
+    "semantic": "keyword",
+}
+
+_SEARCH_MODES: dict[str, Any] = {
+    "keyword": _search_keyword_mode,
+    "symbol": _search_symbol_mode,
+    "error": _search_error_mode,
+}
+
+
 @mcp.tool()
 def code_search(query: str, project_path: str, search_type: str = "keyword") -> dict[str, Any]:
     """Search code by keyword/symbol/error with indexed and fallback methods."""
@@ -529,100 +638,18 @@ def code_search(query: str, project_path: str, search_type: str = "keyword") -> 
     if not query.strip():
         return {"error": "query is required"}
 
-    mode = search_type.lower().strip()
-    results: list[dict[str, Any]] = []
-
-    if mode in {"keyword", "semantic"}:
-        rg_cmd = [
-            "rg",
-            "-n",
-            "--glob",
-            "*.py",
-            "--glob",
-            "*.js",
-            "--glob",
-            "*.ts",
-            "--glob",
-            "*.jsx",
-            "--glob",
-            "*.tsx",
-            query,
-            root,
-        ]
-        rg = _run_subprocess(rg_cmd, timeout=30)
-        if rg.get("ok"):
-            for line in (rg.get("stdout", "") or "").splitlines()[:40]:
-                parts = line.split(":", 2)
-                if len(parts) < 3:
-                    continue
-                results.append(
-                    {
-                        "file_path": parts[0],
-                        "line_number": int(parts[1]) if parts[1].isdigit() else 0,
-                        "snippet": parts[2][:200],
-                        "match_type": "keyword",
-                    }
-                )
-        else:
-            results.extend(_search_keyword_fallback(query, root))
-
-    elif mode == "symbol":
-        db_path = os.path.join(INDEX_DIR, f"{_get_project_hash(root)}.db")
-        if not os.path.exists(db_path):
-            return {"error": f"No index for {root}. Run code_index_project first."}
-        with sqlite3.connect(db_path) as conn:
-            rows = conn.execute(
-                "SELECT file_path, symbol_type, symbol_name, line_number FROM symbols WHERE symbol_name LIKE ? LIMIT 20",
-                (f"%{query}%",),
-            ).fetchall()
-        for row in rows:
-            results.append(
-                {
-                    "file_path": row[0],
-                    "line_number": row[3],
-                    "snippet": f"{row[1]}: {row[2]}",
-                    "match_type": "symbol",
-                }
-            )
-
-    elif mode == "error":
-        patterns = [query, "Error:", "Exception:", "Traceback", "FAILED"]
-        seen_files: set[str] = set()
-        for pattern in patterns[:2]:
-            for root_dir, dirs, files in os.walk(root):
-                dirs[:] = [name for name in dirs if name not in SKIP_DIRS]
-                for name in files:
-                    if Path(name).suffix.lower() not in {".log", ".txt"}:
-                        continue
-                    path = os.path.join(root_dir, name)
-                    if path in seen_files:
-                        continue
-                    try:
-                        content = _read_text(path)
-                    except Exception:
-                        continue
-                    if pattern.lower() in content.lower():
-                        results.append(
-                            {
-                                "file_path": path,
-                                "line_number": 0,
-                                "snippet": f"Found '{pattern}'",
-                                "match_type": "error_file",
-                            }
-                        )
-                        seen_files.add(path)
-                        if len(results) >= 20:
-                            break
-                if len(results) >= 20:
-                    break
-            if len(results) >= 20:
-                break
-    else:
+    mode = _SEARCH_MODE_ALIASES.get(search_type.lower().strip(), search_type.lower().strip())
+    handler = _SEARCH_MODES.get(mode)
+    if not handler:
         return {"error": "search_type must be one of: semantic, keyword, symbol, error"}
+
+    raw_results = handler(query, root)
+    if isinstance(raw_results, dict):
+        return raw_results
 
     dedup: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for item in results:
+    for item in raw_results:
         key = f"{item['file_path']}:{item['line_number']}:{item['match_type']}"
         if key in seen:
             continue
@@ -741,6 +768,66 @@ def code_edit(
     }
 
 
+def _check_lint_python(path: str) -> dict[str, Any]:
+    """Run ruff check on a Python file."""
+    lint = _run_subprocess(["ruff", "check", path], timeout=30)
+    if lint.get("error") and "Command not found" in lint["error"]:
+        return {"ok": True, "skipped": True, "reason": lint["error"]}
+    return {
+        "ok": bool(lint.get("ok")),
+        "output": _truncate((lint.get("stdout", "") + lint.get("stderr", "")).strip(), 1000),
+    }
+
+
+def _check_lint_js(path: str, root: str) -> dict[str, Any]:
+    """Run eslint on JS/TS files, or skip when config/tool is unavailable."""
+    has_eslint = any(
+        os.path.exists(os.path.join(root, name))
+        for name in [".eslintrc", ".eslintrc.js", ".eslintrc.json"]
+    )
+    if not has_eslint:
+        return {"ok": True, "skipped": True, "reason": "No eslint config found"}
+
+    lint = _run_subprocess(["eslint", path], timeout=30)
+    if lint.get("error") and "Command not found" in lint["error"]:
+        return {"ok": True, "skipped": True, "reason": lint["error"]}
+    return {
+        "ok": bool(lint.get("ok")),
+        "output": _truncate((lint.get("stdout", "") + lint.get("stderr", "")).strip(), 1000),
+    }
+
+
+def _check_typecheck_python(path: str, root: str) -> dict[str, Any] | None:
+    """Run mypy for Python files when project config exists."""
+    has_mypy = any(
+        os.path.exists(os.path.join(root, name))
+        for name in ["mypy.ini", "setup.cfg", "pyproject.toml"]
+    )
+    if not has_mypy:
+        return None
+
+    typecheck = _run_subprocess(["mypy", path], timeout=60)
+    if typecheck.get("error") and "Command not found" in typecheck["error"]:
+        return {"ok": True, "skipped": True, "reason": typecheck["error"]}
+    return {
+        "ok": bool(typecheck.get("ok")),
+        "output": _truncate((typecheck.get("stdout", "") + typecheck.get("stderr", "")).strip(), 1000),
+    }
+
+
+def _find_related_tests(path: str, root: str) -> list[str]:
+    """Locate convention-based test files related to a source file."""
+    stem = Path(path).stem
+    patterns = [
+        os.path.join(root, "tests", f"test_{stem}.py"),
+        os.path.join(root, f"test_{stem}.py"),
+        os.path.join(root, f"{stem}.test.ts"),
+        os.path.join(root, f"{stem}.test.js"),
+        os.path.join(root, f"{stem}.spec.ts"),
+    ]
+    return [item for item in patterns if os.path.exists(item)]
+
+
 @mcp.tool()
 def code_run_checks(file_path: str, project_path: str = "") -> dict[str, Any]:
     """Run syntax, lint, optional typecheck, and related tests."""
@@ -757,57 +844,16 @@ def code_run_checks(file_path: str, project_path: str = "") -> dict[str, Any]:
         return {"passed": False, "checks": checks, "halted_at": "syntax", "file": path}
 
     if ext == ".py":
-        lint = _run_subprocess(["ruff", "check", path], timeout=30)
-        if lint.get("error") and "Command not found" in lint["error"]:
-            checks["lint"] = {"ok": True, "skipped": True, "reason": lint["error"]}
-        else:
-            checks["lint"] = {
-                "ok": bool(lint.get("ok")),
-                "output": _truncate((lint.get("stdout", "") + lint.get("stderr", "")).strip(), 1000),
-            }
-
-    elif ext in {".js", ".jsx", ".ts", ".tsx"}:
-        has_eslint = any(
-            os.path.exists(os.path.join(root, name))
-            for name in [".eslintrc", ".eslintrc.js", ".eslintrc.json"]
-        )
-        if has_eslint:
-            lint = _run_subprocess(["eslint", path], timeout=30)
-            if lint.get("error") and "Command not found" in lint["error"]:
-                checks["lint"] = {"ok": True, "skipped": True, "reason": lint["error"]}
-            else:
-                checks["lint"] = {
-                    "ok": bool(lint.get("ok")),
-                    "output": _truncate((lint.get("stdout", "") + lint.get("stderr", "")).strip(), 1000),
-                }
+        checks["lint"] = _check_lint_python(path)
+    if ext in {".js", ".jsx", ".ts", ".tsx"}:
+        checks["lint"] = _check_lint_js(path, root)
 
     if ext == ".py":
-        has_mypy = any(
-            os.path.exists(os.path.join(root, name))
-            for name in ["mypy.ini", "setup.cfg", "pyproject.toml"]
-        )
-        if has_mypy:
-            typecheck = _run_subprocess(["mypy", path], timeout=60)
-            if typecheck.get("error") and "Command not found" in typecheck["error"]:
-                checks["typecheck"] = {"ok": True, "skipped": True, "reason": typecheck["error"]}
-            else:
-                checks["typecheck"] = {
-                    "ok": bool(typecheck.get("ok")),
-                    "output": _truncate(
-                        (typecheck.get("stdout", "") + typecheck.get("stderr", "")).strip(),
-                        1000,
-                    ),
-                }
+        typecheck = _check_typecheck_python(path, root)
+        if typecheck is not None:
+            checks["typecheck"] = typecheck
 
-    stem = Path(path).stem
-    patterns = [
-        os.path.join(root, "tests", f"test_{stem}.py"),
-        os.path.join(root, f"test_{stem}.py"),
-        os.path.join(root, f"{stem}.test.ts"),
-        os.path.join(root, f"{stem}.test.js"),
-        os.path.join(root, f"{stem}.spec.ts"),
-    ]
-    test_files = [item for item in patterns if os.path.exists(item)]
+    test_files = _find_related_tests(path, root)
     if test_files:
         test_result = _run_subprocess(["pytest", *test_files, "-v", "--tb=short"], cwd=root, timeout=120)
         if test_result.get("error") and "Command not found" in test_result["error"]:

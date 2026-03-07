@@ -1396,6 +1396,8 @@ def list_all(type: str) -> list[dict[str, Any]]:
 
 
 def _migrate_legacy_files(router: MemoryRouter | None = None) -> None:
+    from pawbot.utils.fs import atomic_write_text
+
     router = router or _get_default_router()
     memory_md = os.path.expanduser("~/pawbot/workspace/MEMORY.md")
     history_md = os.path.expanduser("~/pawbot/workspace/HISTORY.md")
@@ -1419,8 +1421,7 @@ def _migrate_legacy_files(router: MemoryRouter | None = None) -> None:
             router.save("episode", {"text": content, "source": "HISTORY.md"})
             logger.info("Migrated HISTORY.md into ChromaEpisodeStore")
 
-    with open(migrated_flag, "w", encoding="utf-8"):
-        pass
+    atomic_write_text(Path(migrated_flag), "")
 
 
 def memory_stats(router: MemoryRouter | None = None) -> dict[str, Any]:

@@ -182,6 +182,11 @@ class SessionManager:
         """Remove a session from the in-memory cache."""
         self._cache.pop(key, None)
 
+    def save_all(self) -> None:
+        """Persist all cached sessions."""
+        for session in list(self._cache.values()):
+            self.save(session)
+
     def list_sessions(self) -> list[dict[str, Any]]:
         """
         List all sessions.

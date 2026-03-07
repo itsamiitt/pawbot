@@ -110,7 +110,7 @@ async def connect_mcp_servers(
                     httpx.AsyncClient(
                         headers=headers,
                         follow_redirects=True,
-                        timeout=None,
+                        timeout=300.0,
                     )
                 )
                 read, write, _ = await stack.enter_async_context(

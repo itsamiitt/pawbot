@@ -15,9 +15,10 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
+import gzip
+import shutil
 import time
-from typing import Any, Callable, Optional
+from typing import Callable
 
 logger = logging.getLogger("pawbot.security")
 
@@ -45,14 +46,28 @@ class SecurityAuditLog:
     """Append-only log of all ActionGate decisions.
 
     Written to ~/.pawbot/logs/security_audit.jsonl
-    Never deleted, never truncated.
+    Rotated and compressed once it reaches the max size.
     """
 
     LOG_PATH = os.path.expanduser("~/.pawbot/logs/security_audit.jsonl")
+    MAX_SIZE_BYTES = 50 * 1024 * 1024
 
     def __init__(self, log_path: str | None = None):
         self._path = log_path or self.LOG_PATH
         os.makedirs(os.path.dirname(self._path), exist_ok=True)
+
+    def _rotate_if_needed(self) -> None:
+        """Compress the active log once it exceeds the rotation threshold."""
+        if not os.path.exists(self._path):
+            return
+        if os.path.getsize(self._path) < self.MAX_SIZE_BYTES:
+            return
+
+        rotated_path = f"{self._path}.1.gz"
+        with open(self._path, "rb") as src:
+            with gzip.open(rotated_path, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+        open(self._path, "w", encoding="utf-8").close()
 
     def log(
         self,
@@ -80,6 +95,7 @@ class SecurityAuditLog:
             "caller": caller,
         }
         try:
+            self._rotate_if_needed()
             with open(self._path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(event) + "\n")
         except Exception as exc:
@@ -160,6 +176,16 @@ class ActionGate:
         "memory_stats",
     }
 
+    RISK_MAP: dict[str, str] = {
+        "server_run": ActionRisk.DANGEROUS,
+        "deploy_apply": ActionRisk.DANGEROUS,
+        "deploy_rollback": ActionRisk.DANGEROUS,
+        "server_write_file": ActionRisk.CAUTION,
+        "server_edit_file": ActionRisk.CAUTION,
+        "git_push": ActionRisk.CAUTION,
+        "browser_click": ActionRisk.CAUTION,
+    }
+
     def __init__(
         self,
         config: dict | None = None,
@@ -176,15 +202,25 @@ class ActionGate:
         """
         self.config = config or {}
         self.confirm_fn = confirmation_callback
-        self.audit = audit_log or SecurityAuditLog()
-
         security_cfg = self.config.get("security", {})
+        self.audit = audit_log or SecurityAuditLog(
+            log_path=security_cfg.get("audit_log_path"),
+        )
         self.require_confirmation_for_dangerous = security_cfg.get(
             "require_confirmation_for_dangerous", True
         )
         self.block_when_running_as_root = security_cfg.get(
             "block_root_execution", True
         )
+        self._risk_overrides = security_cfg.get("risk_overrides", {})
+
+    def _get_risk_level(self, tool_name: str) -> str:
+        """Resolve the configured base risk level for a tool."""
+        if tool_name in self._risk_overrides:
+            return self._risk_overrides[tool_name]
+        if tool_name in self.SAFE_TOOLS:
+            return ActionRisk.SAFE
+        return self.RISK_MAP.get(tool_name, ActionRisk.CAUTION)
 
     def check(
         self,
@@ -199,8 +235,10 @@ class ActionGate:
           - allowed=True,  reason="confirmed" â†’ execute, user confirmed
           - allowed=False, reason="..."       â†’ do not execute, return reason as error
         """
+        risk = self._get_risk_level(tool_name)
+
         # 1. Always-blocked tools
-        if tool_name in self.BLOCKED_TOOLS:
+        if tool_name in self.BLOCKED_TOOLS or risk == ActionRisk.BLOCKED:
             self._log_and_block(
                 tool_name, args, ActionRisk.BLOCKED,
                 f"Tool '{tool_name}' is permanently blocked",
@@ -217,7 +255,7 @@ class ActionGate:
             return False, "Cannot execute tools as root user"
 
         # 3. Safe tools â€” always allow
-        if tool_name in self.SAFE_TOOLS:
+        if risk == ActionRisk.SAFE:
             self.audit.log(
                 "gate_check", tool_name, args, ActionRisk.SAFE, "allow", caller=caller,
             )
@@ -228,36 +266,24 @@ class ActionGate:
         for pattern in self.DANGEROUS_PATTERNS:
             if pattern.lower() in args_str:
                 reason = f"Dangerous pattern detected: '{pattern}'"
-                if self.require_confirmation_for_dangerous and self.confirm_fn:
-                    confirmed = self.confirm_fn(tool_name, args, reason)
-                    if confirmed:
-                        self.audit.log(
-                            "gate_check", tool_name, args,
-                            ActionRisk.DANGEROUS, "confirmed", reason, caller=caller,
-                        )
-                        return True, "confirmed"
-                self._log_and_block(tool_name, args, ActionRisk.DANGEROUS, reason, caller=caller)
-                return False, f"Blocked: {reason}. Requires explicit user confirmation."
+                return self._handle_dangerous(tool_name, args, reason, caller)
 
         # 5. Check args for caution patterns
         for pattern in self.CAUTION_PATTERNS:
             if pattern.lower() in args_str:
                 reason = f"Caution pattern: '{pattern}'"
-                if self.confirm_fn:
-                    confirmed = self.confirm_fn(tool_name, args, reason)
-                    if not confirmed:
-                        self._log_and_block(
-                            tool_name, args, ActionRisk.CAUTION, reason, caller=caller,
-                        )
-                        return False, f"Blocked: user did not confirm. {reason}"
-                self.audit.log(
-                    "gate_check", tool_name, args,
-                    ActionRisk.CAUTION, "confirmed", reason, caller=caller,
-                )
-                return True, "confirmed"
+                return self._handle_caution(tool_name, args, reason, caller)
+
+        if risk == ActionRisk.DANGEROUS:
+            reason = f"Configured dangerous tool: '{tool_name}'"
+            return self._handle_dangerous(tool_name, args, reason, caller)
+
+        if risk == ActionRisk.CAUTION:
+            reason = f"Configured caution tool: '{tool_name}'"
+            return self._handle_caution(tool_name, args, reason, caller)
 
         # 6. Default: allow
-        self.audit.log("gate_check", tool_name, args, ActionRisk.SAFE, "allow", caller=caller)
+        self.audit.log("gate_check", tool_name, args, risk, "allow", caller=caller)
         return True, ""
 
     def wrap(self, tool_fn: Callable, tool_name: str) -> Callable:
@@ -276,6 +302,51 @@ class ActionGate:
         _gated.__name__ = tool_name
         _gated.__doc__ = getattr(tool_fn, "__doc__", "")
         return _gated
+
+    def _handle_dangerous(
+        self,
+        tool_name: str,
+        args: dict,
+        reason: str,
+        caller: str,
+    ) -> tuple[bool, str]:
+        """Handle a dangerous tool decision, optionally requiring confirmation."""
+        if not self.require_confirmation_for_dangerous:
+            self.audit.log(
+                "gate_check", tool_name, args, ActionRisk.DANGEROUS, "allow", reason, caller=caller,
+            )
+            return True, ""
+
+        if self.confirm_fn and self.confirm_fn(tool_name, args, reason):
+            self.audit.log(
+                "gate_check", tool_name, args,
+                ActionRisk.DANGEROUS, "confirmed", reason, caller=caller,
+            )
+            return True, "confirmed"
+
+        self._log_and_block(tool_name, args, ActionRisk.DANGEROUS, reason, caller=caller)
+        return False, f"Blocked: {reason}. Requires explicit user confirmation."
+
+    def _handle_caution(
+        self,
+        tool_name: str,
+        args: dict,
+        reason: str,
+        caller: str,
+    ) -> tuple[bool, str]:
+        """Handle a caution-level tool decision."""
+        if self.confirm_fn:
+            confirmed = self.confirm_fn(tool_name, args, reason)
+            if not confirmed:
+                self._log_and_block(tool_name, args, ActionRisk.CAUTION, reason, caller=caller)
+                return False, f"Blocked: user did not confirm. {reason}"
+
+        decision = "confirmed" if self.confirm_fn else "allow"
+        self.audit.log(
+            "gate_check", tool_name, args,
+            ActionRisk.CAUTION, decision, reason, caller=caller,
+        )
+        return True, "confirmed" if self.confirm_fn else ""
 
     def _log_and_block(self, tool: str, args: dict, risk: str, reason: str, caller: str = "agent") -> None:
         self.audit.log("blocked", tool, args, risk, "block", reason, caller=caller)

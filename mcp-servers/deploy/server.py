@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -58,12 +59,13 @@ def _rollback_file(app_name: str) -> str:
     return os.path.join(tempfile.gettempdir(), f".rollback_{app_name}")
 
 
-def _run(cmd: str, cwd: str | None = None, timeout: int = 120) -> dict[str, Any]:
-    """Run a shell command and return a structured result."""
+def _run(cmd: str | list[str], cwd: str | None = None, timeout: int = 120) -> dict[str, Any]:
+    """Run a command and return a structured result."""
+    argv = cmd if isinstance(cmd, list) else shlex.split(cmd)
     try:
         result = subprocess.run(
-            cmd,
-            shell=True,
+            argv,
+            shell=False,
             cwd=cwd,
             timeout=timeout,
             capture_output=True,

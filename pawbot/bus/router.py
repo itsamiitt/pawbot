@@ -7,7 +7,6 @@ queues messages when agent is busy, and persists conversation history.
 from __future__ import annotations
 
 import queue
-import threading
 import time
 from typing import Any
 

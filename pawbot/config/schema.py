@@ -1,5 +1,7 @@
 """Configuration schema using Pydantic."""
 
+
+
 from pathlib import Path
 from typing import Literal
 
@@ -15,22 +17,30 @@ class Base(BaseModel):
 
 
 class WhatsAppConfig(Base):
-    """WhatsApp channel configuration."""
+    """WhatsApp channel configuration (Tier 1 — Production)."""
 
     enabled: bool = False
     bridge_url: str = "ws://localhost:3001"
     bridge_token: str = ""  # Shared token for bridge auth (optional, recommended)
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
+    # Phase 4: Production hardening
+    auto_reconnect: bool = True
+    max_reconnect_delay: int = 300  # Max backoff seconds
+    tier: str = "production"  # Informational — production | supported | community
 
 
 class TelegramConfig(Base):
-    """Telegram channel configuration."""
+    """Telegram channel configuration (Tier 1 — Production)."""
 
     enabled: bool = False
     token: str = ""  # Bot token from @BotFather
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
     proxy: str | None = None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     reply_to_message: bool = False  # If true, bot replies quote the original message
+    # Phase 4: Production hardening
+    auto_reconnect: bool = True
+    max_reconnect_delay: int = 300  # Max backoff seconds
+    tier: str = "production"  # Informational — production | supported | community
 
 
 class FeishuConfig(Base):
@@ -184,26 +194,69 @@ class QQConfig(Base):
     secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
 
-class MatrixConfig(Base):
-    """Matrix (Element) channel configuration."""
-    enabled: bool = False
-    homeserver: str = "https://matrix.org"
-    access_token: str = ""
-    user_id: str = ""                       # e.g. @bot:matrix.org
-    device_id: str = ""
-    e2ee_enabled: bool = True               # end-to-end encryption support
-    sync_stop_grace_seconds: int = 2        # graceful sync_forever shutdown timeout
-    max_media_bytes: int = 20 * 1024 * 1024 # inbound + outbound attachment limit
-    allow_from: list[str] = Field(default_factory=list)
-    group_policy: Literal["open", "mention", "allowlist"] = "open"
-    group_allow_from: list[str] = Field(default_factory=list)
-    allow_room_mentions: bool = False
+# ── Phase 11: Channel Policies ───────────────────────────────────────────────
+
+
+class MediaPolicyConfig(Base):
+    """Media handling policy configuration."""
+
+    max_size_mb: int = 50
+    allowed_types: list[str] = Field(
+        default_factory=lambda: [
+            "image/jpeg", "image/png", "image/gif", "image/webp",
+            "audio/ogg", "audio/mpeg", "audio/mp4",
+            "video/mp4",
+            "application/pdf",
+            "text/plain", "text/csv",
+        ]
+    )
+    auto_transcribe_voice: bool = True
+    auto_ocr_images: bool = False
+    download_dir: str = ""
+    retention_days: int = 30
+
+
+class ChannelPolicyConfig(Base):
+    """Unified policy configuration for any channel (Phase 11.1).
+
+    Controls DM/group access rules, rate limiting, debounce,
+    acknowledgment reactions, media limits, and response formatting.
+    """
+
+    # DM policy: open | allowlist | pairing | disabled
+    dm_policy: str = "open"
+    allowed_users: list[str] = Field(default_factory=list)
+
+    # Group policy: open | allowlist | mention | disabled
+    group_policy: str = "mention"
+    allowed_groups: list[str] = Field(default_factory=list)
+    require_mention: bool = True
+
+    # Self-chat
+    self_chat_mode: bool = False
+
+    # Debounce and rate limiting
+    debounce_ms: int = 500
+    rate_limit_per_user: int = 30  # Max messages per minute per user
+
+    # Ack reactions: none | all | group-mentions | dms-only
+    ack_reactions: str = "none"
+    typing_indicator: bool = True
+
+    # Media
+    media: MediaPolicyConfig = Field(default_factory=MediaPolicyConfig)
+
+    # Response formatting
+    max_response_length: int = 4096
+    split_long_messages: bool = True
+
 
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
     send_progress: bool = True    # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
+    policy: ChannelPolicyConfig = Field(default_factory=ChannelPolicyConfig)  # Phase 11
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
@@ -216,10 +269,12 @@ class ChannelsConfig(Base):
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
 
 
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
     workspace: str = "~/.pawbot/workspace"
+    heartbeat: "AgentHeartbeatConfig" = Field(default_factory=lambda: AgentHeartbeatConfig())
     model: str = "anthropic/claude-opus-4-5"
     provider: str = "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     max_tokens: int = 8192
@@ -229,10 +284,84 @@ class AgentDefaults(Base):
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
 
 
+# ── Phase 9: Per-Agent Tool Allow-Lists ──────────────────────────────────────
+
+
+class AgentToolsConfig(Base):
+    """Per-agent tool permission configuration (Phase 9.4).
+
+    Supports glob patterns:
+        allow: ["browse", "browser_*", "shopify.*"]
+        deny: ["exec", "browser_eval"]
+    """
+
+    allow: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Tool names this agent may use. Empty = all tools. "
+            "Supports glob patterns: 'shopify_*', 'browser_*'"
+        ),
+    )
+    deny: list[str] = Field(
+        default_factory=list,
+        description="Tool names explicitly blocked for this agent.",
+    )
+    max_calls_per_session: int = 200  # Safety limit
+
+
+class AgentHeartbeatConfig(Base):
+    """Per-agent heartbeat configuration."""
+
+    enabled: bool = True
+    every: str = "30m"
+    target: str = "last"
+    message: str = ""
+    max_silence_before_alert: str = "2h"
+
+
+class AgentSubagentPoolConfig(Base):
+    """Per-agent subagent pool settings within agents config."""
+
+    max_concurrent: int = 12
+    timeout_seconds: int = 300
+
+
+class AgentDefinition(Base):
+    """Definition of a single agent runtime."""
+
+    id: str = "main"
+    name: str = ""
+    default: bool = False
+    workspace: str = ""
+    heartbeat: AgentHeartbeatConfig = Field(default_factory=AgentHeartbeatConfig)
+    tools: AgentToolsConfig = Field(default_factory=AgentToolsConfig)
+    model: str = ""
+    temperature: float = -1.0
+    max_tokens: int = 0
+    max_tool_iterations: int = 0
+    memory_window: int = 0
+    reasoning_effort: str | None = None
+    enabled: bool = True
+    soul_file: str = ""
+    skills_dir: str = ""
+    channels: list[str] = Field(default_factory=lambda: ["*"])
+    contacts: list[str] = Field(default_factory=lambda: ["*"])
+    session_prefix: str = ""
+
+
 class AgentsConfig(Base):
     """Agent configuration."""
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    tools: AgentToolsConfig = Field(default_factory=AgentToolsConfig)  # Phase 9
+    agents: list[AgentDefinition] = Field(
+        default_factory=lambda: [
+            AgentDefinition(id="main", default=True),
+        ],
+        alias="list",
+    )
+    max_concurrent: int = 8
+    subagents: AgentSubagentPoolConfig = Field(default_factory=AgentSubagentPoolConfig)
 
 
 class ProviderConfig(Base):
@@ -313,6 +442,7 @@ class SecurityConfig(Base):
     enabled: bool = True
     require_confirmation_for_dangerous: bool = True
     block_root_execution: bool = True
+    risk_overrides: dict[str, str] = Field(default_factory=dict)
     min_memory_salience: float = 0.2
     max_memory_tokens: int = 300
     injection_detection: bool = True
@@ -392,12 +522,67 @@ class ToolsConfig(Base):
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
+class RoutingRule(Base):
+    """Single routing table entry."""
+
+    task_type: str
+    complexity_min: float = 0.0
+    complexity_max: float = 1.0
+    provider: str = "openrouter"
+    model: str = "anthropic/claude-sonnet-4-6"
+
+
+class RoutingConfig(Base):
+    """Model routing configuration (Phase 3)."""
+
+    enabled: bool = True
+    rules: list[RoutingRule] = Field(default_factory=list)
+    fallback_provider: str = "openrouter"
+    fallback_model: str = "anthropic/claude-haiku-4-5"
+
+
+# ── Phase 8: Browser Sandbox ─────────────────────────────────────────────────
+
+
+class BrowserSandboxConfig(Base):
+    """Browser sandbox configuration (Phase 8)."""
+
+    enabled: bool = False               # Master switch for browser tools
+    headless: bool = True               # Run Chromium in headless mode
+    auto_start: bool = False            # Start browser on agent boot
+    max_pages: int = 5                  # Max concurrent browser tabs
+    page_timeout_ms: int = 30_000       # Navigation timeout in ms
+    allowed_domains: list[str] = Field(default_factory=list)  # Empty = all allowed
+    blocked_domains: list[str] = Field(
+        default_factory=lambda: [
+            "*.onion",                  # Tor hidden services
+            "localhost",                # Prevent SSRF
+            "127.0.0.1",
+            "0.0.0.0",
+            "169.254.169.254",          # AWS metadata endpoint
+            "metadata.google.internal",  # GCP metadata
+        ]
+    )
+    persist_state: bool = True          # Save cookies/localStorage across sessions
+    screenshot_retention_days: int = 7  # Days to keep screenshots before cleanup
+    js_execution: bool = True           # Allow JS eval tool (high risk)
+    download_dir: str = ""              # Where to save downloads (empty = disabled)
+
+
+class SandboxConfig(Base):
+    """Overall sandbox configuration (Phase 8)."""
+
+    mode: str = "off"                   # "off", "basic", "strict"
+    browser: BrowserSandboxConfig = Field(default_factory=BrowserSandboxConfig)
+
+
 class Config(BaseSettings):
     """Root configuration for pawbot."""
 
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
+    routing: RoutingConfig = Field(default_factory=RoutingConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     heartbeat: HeartbeatEngineConfig = Field(default_factory=HeartbeatEngineConfig)
     cron: CronConfig = Field(default_factory=CronConfig)
@@ -407,53 +592,83 @@ class Config(BaseSettings):
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     subagents: SubagentsConfig = Field(default_factory=SubagentsConfig)
+    sandbox: SandboxConfig = Field(default_factory=SandboxConfig)  # Phase 8
 
     @property
     def workspace_path(self) -> Path:
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
 
-    def _match_provider(self, model: str | None = None) -> tuple["ProviderConfig | None", str | None]:
-        """Match provider config and its registry name. Returns (config, spec_name)."""
+    def _match_forced_provider(self) -> tuple["ProviderConfig | None", str | None]:
+        """Match explicitly configured provider when agents.defaults.provider != auto."""
+        forced = self.agents.defaults.provider
+        if forced == "auto":
+            return None, None
+        provider = getattr(self.providers, forced, None)
+        return (provider, forced) if provider else (None, None)
+
+    def _match_by_prefix(self, model_lower: str) -> tuple["ProviderConfig | None", str | None]:
+        """Match provider by model prefix (e.g., github-copilot/...)."""
         from pawbot.providers.registry import PROVIDERS
 
-        forced = self.agents.defaults.provider
-        if forced != "auto":
-            p = getattr(self.providers, forced, None)
-            return (p, forced) if p else (None, None)
-
-        model_lower = (model or self.agents.defaults.model).lower()
-        model_normalized = model_lower.replace("-", "_")
-        model_prefix = model_lower.split("/", 1)[0] if "/" in model_lower else ""
+        if "/" not in model_lower:
+            return None, None
+        model_prefix = model_lower.split("/", 1)[0]
         normalized_prefix = model_prefix.replace("-", "_")
+
+        for spec in PROVIDERS:
+            provider = getattr(self.providers, spec.name, None)
+            if provider and normalized_prefix == spec.name:
+                if spec.is_oauth or provider.api_key:
+                    return provider, spec.name
+        return None, None
+
+    def _match_by_keyword(self, model_lower: str) -> tuple["ProviderConfig | None", str | None]:
+        """Match provider by keyword in model name using registry order priority."""
+        from pawbot.providers.registry import PROVIDERS
+
+        model_normalized = model_lower.replace("-", "_")
 
         def _kw_matches(kw: str) -> bool:
             kw = kw.lower()
             return kw in model_lower or kw.replace("-", "_") in model_normalized
 
-        # Explicit provider prefix wins — prevents `github-copilot/...codex` matching openai_codex.
         for spec in PROVIDERS:
-            p = getattr(self.providers, spec.name, None)
-            if p and model_prefix and normalized_prefix == spec.name:
-                if spec.is_oauth or p.api_key:
-                    return p, spec.name
+            provider = getattr(self.providers, spec.name, None)
+            if provider and any(_kw_matches(kw) for kw in spec.keywords):
+                if spec.is_oauth or provider.api_key:
+                    return provider, spec.name
+        return None, None
 
-        # Match by keyword (order follows PROVIDERS registry)
-        for spec in PROVIDERS:
-            p = getattr(self.providers, spec.name, None)
-            if p and any(_kw_matches(kw) for kw in spec.keywords):
-                if spec.is_oauth or p.api_key:
-                    return p, spec.name
+    def _match_by_fallback(self) -> tuple["ProviderConfig | None", str | None]:
+        """Match first non-OAuth provider with an API key."""
+        from pawbot.providers.registry import PROVIDERS
 
-        # Fallback: gateways first, then others (follows registry order)
-        # OAuth providers are NOT valid fallbacks — they require explicit model selection
         for spec in PROVIDERS:
             if spec.is_oauth:
                 continue
-            p = getattr(self.providers, spec.name, None)
-            if p and p.api_key:
-                return p, spec.name
+            provider = getattr(self.providers, spec.name, None)
+            if provider and provider.api_key:
+                return provider, spec.name
         return None, None
+
+    def _match_provider(self, model: str | None = None) -> tuple["ProviderConfig | None", str | None]:
+        """Match provider config and its registry name. Returns (config, spec_name)."""
+        model_lower = (model or self.agents.defaults.model).lower()
+
+        provider, name = self._match_forced_provider()
+        if provider:
+            return provider, name
+
+        provider, name = self._match_by_prefix(model_lower)
+        if provider:
+            return provider, name
+
+        provider, name = self._match_by_keyword(model_lower)
+        if provider:
+            return provider, name
+
+        return self._match_by_fallback()
 
     def get_provider(self, model: str | None = None) -> ProviderConfig | None:
         """Get matched provider config (api_key, api_base, extra_headers). Falls back to first available."""
@@ -487,6 +702,11 @@ class Config(BaseSettings):
         return None
 
     model_config = ConfigDict(env_prefix="PAWBOT_", env_nested_delimiter="__")
+
+
+AgentDefaults.model_rebuild()
+AgentDefinition.model_rebuild()
+AgentsConfig.model_rebuild()
 
 
 # MASTER_REFERENCE.md canonical alias

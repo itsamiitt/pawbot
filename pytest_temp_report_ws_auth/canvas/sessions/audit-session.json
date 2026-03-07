@@ -1,0 +1,15 @@
+{
+  "session_id": "audit-session",
+  "title": "audit-session",
+  "format": "markdown",
+  "content": "hello dashboard websocket",
+  "blocks": [
+    {
+      "type": "markdown",
+      "label": "Notes",
+      "content": "hello dashboard websocket"
+    }
+  ],
+  "metadata": {},
+  "updated_at": 1772846490.21115
+}

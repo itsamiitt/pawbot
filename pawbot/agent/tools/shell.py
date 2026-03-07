@@ -3,10 +3,26 @@
 import asyncio
 import os
 import re
+import shlex
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 from pawbot.agent.tools.base import Tool
+
+
+# Patterns that are ALWAYS blocked (even in non-restricted mode)
+_ALWAYS_BLOCKED: list[re.Pattern] = [
+    re.compile(r'\brm\s+(-[rfR]+\s+)?/(?!\w)'),    # rm -rf /
+    re.compile(r'\bfind\s+/\s+.*-delete\b'),         # find / -delete
+    re.compile(r'\bmkfs\b'),                           # format disk
+    re.compile(r'\bdd\s+.*of=/dev/'),                  # dd to device
+    re.compile(r'>\s*/dev/sd[a-z]'),                   # overwrite disk
+    re.compile(r'\bchmod\s+-R\s+777\s+/'),             # chmod 777 /
+    re.compile(r'\bcurl\b.*\|\s*(ba)?sh'),             # curl | bash
+    re.compile(r'\bwget\b.*\|\s*(ba)?sh'),             # wget | bash
+]
 
 
 class ExecTool(Tool):
@@ -124,30 +140,63 @@ class ExecTool(Tool):
             return f"Error executing command: {str(e)}"
 
     def _guard_command(self, command: str, cwd: str) -> str | None:
-        """Best-effort safety guard for potentially destructive commands."""
+        """Best-effort safety guard for potentially destructive commands.
+
+        Layer 1: _ALWAYS_BLOCKED compiled regexes (cannot be overridden)
+        Layer 2: Configurable deny_patterns
+        Layer 3: Production-mode restrictions
+        Layer 4: Workspace path restriction
+        """
         cmd = command.strip()
-        if self.environment in {"prod", "production"} and self._is_prod_restricted(cmd):
-            return "Error: Command blocked by production safety policy"
         lower = cmd.lower()
 
+        # Layer 1: Always-blocked patterns (compiled, cannot be overridden)
+        for pattern in _ALWAYS_BLOCKED:
+            if pattern.search(lower):
+                logger.warning("Blocked dangerous command: {}", cmd[:100])
+                return f"Error: Command blocked by safety guard (dangerous pattern: {pattern.pattern})"
+
+        # Layer 2: Production environment restrictions
+        if self.environment in {"prod", "production"} and self._is_prod_restricted(cmd):
+            return "Error: Command blocked by production safety policy"
+
+        # Layer 3: Configurable deny patterns
         for pattern in self.deny_patterns:
             if re.search(pattern, lower):
                 return "Error: Command blocked by safety guard (dangerous pattern detected)"
 
+        # Layer 4: Allowlist enforcement
         if self.allow_patterns:
             if not any(re.search(p, lower) for p in self.allow_patterns):
                 return "Error: Command blocked by safety guard (not in allowlist)"
 
+        # Layer 5: Workspace restriction — verify all file paths
         if self.restrict_to_workspace:
             if "..\\" in cmd or "../" in cmd:
                 return "Error: Command blocked by safety guard (path traversal detected)"
 
             cwd_path = Path(cwd).resolve()
 
+            # Use shlex for better path extraction
+            try:
+                parts = shlex.split(command)
+                for part in parts:
+                    if part.startswith('/') and not str(cwd_path).startswith('/'):
+                        continue  # Skip POSIX paths on Windows
+                    # Check extracted absolute paths
+                    try:
+                        p = Path(part).resolve()
+                    except Exception:
+                        continue
+                    if p.is_absolute() and cwd_path not in p.parents and p != cwd_path:
+                        return f"Error: Command blocked by safety guard (path '{part}' outside workspace)"
+            except ValueError:
+                pass  # shlex parse error — fall through to regex-based check
+
             for raw in self._extract_absolute_paths(cmd):
                 try:
                     p = Path(raw.strip()).resolve()
-                except Exception as e:  # noqa: F841
+                except Exception:
                     continue
                 if p.is_absolute() and cwd_path not in p.parents and p != cwd_path:
                     return "Error: Command blocked by safety guard (path outside working dir)"

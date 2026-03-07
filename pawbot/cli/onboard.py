@@ -88,13 +88,13 @@ def run_onboard_wizard(config: Config) -> Config:
     """Run the full interactive onboarding wizard. Returns updated config."""
     _print_welcome()
 
-    console.print(f"\n[bold cyan]━━━ Step 1/3: LLM Provider ━━━[/bold cyan]\n")
+    console.print("\n[bold cyan]━━━ Step 1/3: LLM Provider ━━━[/bold cyan]\n")
     config = _step_provider(config)
 
-    console.print(f"\n[bold cyan]━━━ Step 2/3: Chat Channel ━━━[/bold cyan]\n")
+    console.print("\n[bold cyan]━━━ Step 2/3: Chat Channel ━━━[/bold cyan]\n")
     config = _step_channel(config)
 
-    console.print(f"\n[bold cyan]━━━ Step 3/3: Done! ━━━[/bold cyan]\n")
+    console.print("\n[bold cyan]━━━ Step 3/3: Done! ━━━[/bold cyan]\n")
     _print_summary(config)
 
     return config
@@ -359,7 +359,6 @@ def _oauth_github_copilot(config: Config) -> Config:
     )
 
     import time
-    import urllib.parse
     import webbrowser
 
     try:
@@ -895,7 +894,7 @@ def _print_summary(config: Config) -> None:
         f"  [bold]Provider:[/bold]  {provider_name or '[dim]not set[/dim]'}",
         f"  [bold]Model:   [/bold]  {model_name or '[dim]not set[/dim]'}",
         f"  [bold]Channels:[/bold]  {', '.join(enabled_channels) if enabled_channels else '[dim]none[/dim]'}",
-        f"  [bold]Config:  [/bold]  ~/.pawbot/config.json",
+        "  [bold]Config:  [/bold]  ~/.pawbot/config.json",
     ]
 
     console.print(Panel(

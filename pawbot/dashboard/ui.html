@@ -103,6 +103,16 @@ label{font-size:12px;font-weight:500;letter-spacing:.5px;text-transform:uppercas
 .toast.success{background:#f0fdf4;border-color:var(--success);color:#166534}
 .toast.error{background:#fef2f2;border-color:var(--danger);color:#991b1b}
 
+/* Auth */
+body.auth-locked #sidebar,body.auth-locked #content,body.auth-locked .mobile-toggle{filter:blur(2px);pointer-events:none;user-select:none}
+#auth-overlay{position:fixed;inset:0;background:rgba(26,24,21,.34);backdrop-filter:blur(10px);display:none;align-items:center;justify-content:center;z-index:1200;padding:20px}
+#auth-overlay.visible{display:flex}
+.auth-card{width:min(420px,100%);background:var(--surface);border:1px solid rgba(255,255,255,.14);border-radius:20px;box-shadow:0 18px 60px rgba(0,0,0,.18);padding:28px}
+.auth-kicker{font-size:10px;letter-spacing:1.4px;text-transform:uppercase;color:var(--text-dim);margin-bottom:10px}
+.auth-title{font-size:28px;font-weight:700;letter-spacing:-.03em;margin-bottom:8px}
+.auth-copy{font-size:13px;line-height:1.6;color:var(--text-dim);margin-bottom:18px}
+.auth-note{font-size:12px;color:var(--text-dim);margin-top:12px}
+
 /* Log viewer */
 .log-viewport{max-height:400px;overflow-y:auto;font-family:var(--mono);font-size:12px;line-height:1.6;padding:8px 0}
 .log-line{display:flex;gap:12px;padding:2px 0;animation:fadeUp 150ms ease}
@@ -196,6 +206,7 @@ label{font-size:12px;font-weight:500;letter-spacing:.5px;text-transform:uppercas
   <div class="sidebar-footer">
     <div class="version">v0.1.4.post3</div>
     <div class="health-dots" id="sidebar-health"></div>
+    <div style="margin-top:10px"><button class="btn btn-sm" id="logout-btn" onclick="logout()" style="display:none;width:100%">Log Out</button></div>
   </div>
 </aside>
 
@@ -360,32 +371,69 @@ label{font-size:12px;font-weight:500;letter-spacing:.5px;text-transform:uppercas
 </main>
 
 <div id="toast-container"></div>
+<div id="auth-overlay">
+  <div class="auth-card">
+    <div class="auth-kicker">Dashboard Security</div>
+    <div class="auth-title">Sign in to Pawbot</div>
+    <div class="auth-copy" id="auth-copy">Enter the dashboard password to unlock the control plane.</div>
+    <div class="field">
+      <label>Password</label>
+      <input type="password" id="auth-password" placeholder="Dashboard password" onkeydown="if(event.key==='Enter')submitLogin()">
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-primary" id="auth-submit" onclick="submitLogin()">Unlock</button>
+    </div>
+    <div class="auth-note" id="auth-note">Session cookies are httpOnly and expire after 24 hours.</div>
+  </div>
+</div>
 
 <script>
 // ── API client ──────────────────────────────────────────────────────────────
 const api = async (url, opts = {}) => {
+  const {
+    allowUnauthenticated = false,
+    suppressToast = false,
+    ...fetchOpts
+  } = opts;
   const el = document.getElementById('loading');
   el.style.width = '60%';
   try {
     const r = await fetch(url, {
-      headers: {'Content-Type': 'application/json', ...opts.headers},
-      ...opts,
-      body: opts.body ? JSON.stringify(opts.body) : undefined
+      credentials: 'same-origin',
+      headers: {'Content-Type': 'application/json', ...fetchOpts.headers},
+      ...fetchOpts,
+      body: fetchOpts.body ? JSON.stringify(fetchOpts.body) : undefined
     });
     el.style.width = '100%';
     setTimeout(() => { el.style.width = '0'; }, 300);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return await r.json();
+    const contentType = r.headers.get('content-type') || '';
+    const payload = contentType.includes('application/json')
+      ? await r.json().catch(() => ({}))
+      : await r.text();
+    if (!r.ok) {
+      const message = typeof payload === 'string'
+        ? payload || `HTTP ${r.status}`
+        : payload.error || payload.detail || `HTTP ${r.status}`;
+      if (r.status === 401 && !allowUnauthenticated) {
+        showLogin('Your dashboard session expired. Sign in again to continue.', true);
+      } else if (!suppressToast) {
+        toast(message, 'error');
+      }
+      throw new Error(message);
+    }
+    return payload;
   } catch (e) {
     el.style.width = '0';
-    toast(e.message, 'error');
+    if (!suppressToast && e.message !== 'Auth required') {
+      toast(e.message, 'error');
+    }
     throw e;
   }
 };
-const GET = (url) => api(url);
-const POST = (url, body) => api(url, {method: 'POST', body});
-const PUT = (url, body) => api(url, {method: 'PUT', body});
-const DEL = (url) => api(url, {method: 'DELETE'});
+const GET = (url, opts = {}) => api(url, opts);
+const POST = (url, body, opts = {}) => api(url, {...opts, method: 'POST', body});
+const PUT = (url, body, opts = {}) => api(url, {...opts, method: 'PUT', body});
+const DEL = (url, opts = {}) => api(url, {...opts, method: 'DELETE'});
 
 // ── Toast ───────────────────────────────────────────────────────────────────
 function toast(msg, type = 'success') {
@@ -398,6 +446,76 @@ function toast(msg, type = 'success') {
 }
 
 // ── Router ──────────────────────────────────────────────────────────────────
+function showLogin(message, configured = true) {
+  document.body.classList.add('auth-locked');
+  document.getElementById('auth-overlay').classList.add('visible');
+  document.getElementById('auth-copy').textContent = message;
+  document.getElementById('auth-note').textContent = configured
+    ? 'Session cookies are httpOnly and expire after 24 hours.'
+    : 'Set PAWBOT_DASHBOARD_PASSWORD or create ~/.pawbot/dashboard_auth.json to enable login.';
+  document.getElementById('auth-submit').disabled = !configured;
+  document.getElementById('logout-btn').style.display = 'none';
+  if (configured) {
+    setTimeout(() => document.getElementById('auth-password').focus(), 10);
+  }
+}
+
+function hideLogin() {
+  document.body.classList.remove('auth-locked');
+  document.getElementById('auth-overlay').classList.remove('visible');
+  document.getElementById('auth-password').value = '';
+  document.getElementById('logout-btn').style.display = 'inline-flex';
+}
+
+async function bootstrapAuth() {
+  try {
+    const data = await GET('/api/auth/status', {
+      allowUnauthenticated: true,
+      suppressToast: true,
+    });
+    if (data.authenticated) {
+      hideLogin();
+      navigate('overview');
+      return;
+    }
+    showLogin(
+      data.configured
+        ? 'Enter the dashboard password to unlock the control plane.'
+        : 'Dashboard auth is enabled but no password is configured yet.',
+      data.configured
+    );
+  } catch (e) {
+    showLogin('Dashboard auth check failed. Retry after the server is reachable.', true);
+  }
+}
+
+async function submitLogin() {
+  const input = document.getElementById('auth-password');
+  const password = input.value.trim();
+  if (!password) return toast('Password required', 'error');
+  try {
+    await POST('/api/auth/login', {password}, {
+      allowUnauthenticated: true,
+      suppressToast: true,
+    });
+    hideLogin();
+    toast('Signed in');
+    navigate(currentSection || 'overview');
+  } catch (e) {
+    toast(e.message, 'error');
+    input.select();
+  }
+}
+
+async function logout() {
+  try {
+    await POST('/api/auth/logout', {}, {suppressToast: true});
+  } catch (e) {}
+  chatHistory = [];
+  renderChat();
+  showLogin('You have been signed out of the dashboard.', true);
+}
+
 let currentSection = 'overview';
 
 function navigate(section) {
@@ -827,11 +945,13 @@ function escHtml(s) {
 
 // ── Polling ─────────────────────────────────────────────────────────────────
 setInterval(() => {
-  if (currentSection === 'overview') loadOverview();
+  if (currentSection === 'overview' && !document.body.classList.contains('auth-locked')) {
+    loadOverview();
+  }
 }, 5000);
 
 // ── Init ────────────────────────────────────────────────────────────────────
-navigate('overview');
+bootstrapAuth();
 </script>
 </body>
 </html>

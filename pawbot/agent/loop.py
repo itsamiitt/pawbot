@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+# ── Section 1 imports (Phase 1 + Phase 2) ────────────────────────────────────
+from pawbot.agent.compactor import compactor
+from pawbot.agent.lane_queue import lane_queue  # noqa: F401 — used by session manager
+
 import asyncio
 import json
 import re
@@ -10,13 +14,15 @@ import time
 import weakref
 from contextlib import AsyncExitStack
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional
+from typing import TYPE_CHECKING, Awaitable, Callable, Optional
 
 from loguru import logger
 
 from pawbot.agent.context import ContextBuilder
 from pawbot.agent.memory import MemoryStore
+from pawbot.agent.output_sanitizer import redact_secrets, scan_output
 from pawbot.agent.subagent import SubagentManager
+from pawbot.observability.metrics import metrics
 from pawbot.agent.tools.cron import CronTool
 from pawbot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from pawbot.agent.tools.message import MessageTool
@@ -34,210 +40,17 @@ if TYPE_CHECKING:
     from pawbot.cron.service import CronService
 
 
-# â”€â”€â”€ Phase 2: Complexity Score Thresholds â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# These constants are referenced in loop.py, context.py, and router.py
-# DO NOT change these values â€” they are in MASTER_REFERENCE.md
-
-SYSTEM_1_MAX = 0.3    # fast path
-SYSTEM_1_5_MAX = 0.7  # ReAct path
-SYSTEM_2_MIN = 0.7    # deliberative path
-
-SYSTEM_PATHS = {
-    "system_1": {
-        "max_iterations": 20,   # raised from 5 — simple tasks still need tool calls
-        "context_mode": "minimal",
-        "model_hint": "cheap",
-    },
-    "system_1_5": {
-        "max_iterations": 40,
-        "context_mode": "standard",
-        "model_hint": "balanced",
-    },
-    "system_2": {
-        "max_iterations": 100,
-        "context_mode": "full",
-        "model_hint": "best",
-        "use_tree_of_thoughts": True,
-        "pre_task_reflection": True,
-    },
-}
-
-
-def get_system_path(complexity_score: float) -> str:
-    """Map a complexity score to a system path name."""
-    if complexity_score <= SYSTEM_1_MAX:
-        return "system_1"
-    elif complexity_score <= SYSTEM_1_5_MAX:
-        return "system_1_5"
-    else:
-        return "system_2"
-
-
-# â”€â”€â”€ Phase 2.1: Dual System Router â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-class ComplexityClassifier:
-    """
-    Scores an incoming message from 0.0 (trivial) to 1.0 (maximum complexity).
-    Score determines which execution path the agent takes:
-    - System 1 (â‰¤0.3): Fast path â€” minimal context, cheap model, max 5 iterations
-    - System 1.5 (0.3â€“0.7): ReAct path â€” standard context, balanced model
-    - System 2 (>0.7): Deliberative â€” full context, best model, Tree of Thoughts
-    """
-
-    KEYWORD_SIGNALS = {
-        "refactor", "deploy", "debug", "architect", "design",
-        "implement", "migrate", "integrate", "analyze", "optimize"
-    }
-
-    URGENCY_SIGNALS = {"urgent", "asap", "broken", "down"}
-
-    FAILURE_SIGNALS = {"error", "failed", "broke", "crash", "exception", "traceback"}
-
-    def score(self, message: str) -> float:
-        """Score an incoming message for complexity (0.0 to 1.0)."""
-        score = 0.0
-        words = message.lower().split()
-        word_set = set(words)
-
-        # Signal: long message
-        if len(words) > 100:
-            score += 0.2
-
-        # Signal: contains complexity keywords
-        if word_set & self.KEYWORD_SIGNALS:
-            score += 0.2
-
-        # Signal: references multiple files/components (look for .py, .js, / patterns)
-        file_refs = re.findall(r'\b\w+\.\w{2,4}\b|/\w+', message)
-        if len(file_refs) >= 2:
-            score += 0.15
-
-        # Signal: deep "why" or "how does" questions
-        if any(message.lower().startswith(p) for p in ["why ", "how does "]):
-            score += 0.1
-
-        # Signal: references past failure
-        if word_set & self.FAILURE_SIGNALS:
-            score += 0.15
-
-        # Signal: spans multiple topics (crude check: sentence count > 3)
-        sentences = re.split(r'[.!?]', message)
-        if len(sentences) > 3:
-            score += 0.1
-
-        # Signal: urgency
-        if word_set & self.URGENCY_SIGNALS:
-            score += 0.1
-
-        return min(1.0, round(score, 2))
-
-
-# â”€â”€â”€ Phase 2.4: Tree of Thoughts Planner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-class ThoughtTreePlanner:
-    """
-    Generate 3 candidate approaches, evaluate each, return best.
-    Falls back to second-best if first fails during execution.
-    Only activates when complexity > 0.7 AND task_type in [coding_task, architecture].
-    """
-
-    def __init__(self, provider: LLMProvider, model: str, memory):
-        self.provider = provider
-        self.model = model
-        self.memory = memory
-
-    async def plan(self, task: str) -> dict:
-        """
-        Generate 3 candidate approaches, evaluate each, return best.
-        Falls back to second-best if first fails during execution.
-        """
-        approaches = await self._generate_approaches(task)
-        scored = [self._score_approach(a, task) for a in approaches]
-        scored.sort(key=lambda x: x["score"], reverse=True)
-
-        # Log rejected approaches to reasoning log
-        logger.info(
-            "ToT: selected '{}' (rejected: {})",
-            scored[0]["name"],
-            [a["name"] for a in scored[1:]],
-        )
-
-        return {
-            "primary": scored[0],
-            "fallback": scored[1] if len(scored) > 1 else None,
-            "all": scored,
-        }
-
-    async def _generate_approaches(self, task: str) -> list[dict]:
-        """Use LLM to generate 3 candidate approaches for the task."""
-        prompt = f"""Given this task, propose 3 different technical approaches.
-Task: {task}
-
-For each approach respond in JSON array:
-[
-  {{
-    "name": "Approach name",
-    "core_idea": "One sentence description",
-    "trade_offs": "Pros and cons",
-    "estimated_complexity": "low|medium|high",
-    "risk_level": "low|medium|high"
-  }}
-]
-Respond with ONLY the JSON array."""
-
-        try:
-            response = await self.provider.chat(
-                messages=[{"role": "user", "content": prompt}],
-                model=self.model,
-                temperature=0.7,
-                max_tokens=1024,
-            )
-            content = response.content or ""
-            # Try to extract JSON from response
-            # Some models wrap in ```json ... ```
-            json_match = re.search(r'\[.*\]', content, re.DOTALL)
-            if json_match:
-                return json.loads(json_match.group())
-            return json.loads(content)
-        except (json.JSONDecodeError, Exception) as e:
-            logger.warning("ToT approach generation failed: {}", e)
-            return [{
-                "name": "default",
-                "core_idea": task,
-                "trade_offs": "",
-                "estimated_complexity": "medium",
-                "risk_level": "medium",
-            }]
-
-    def _score_approach(self, approach: dict, task: str) -> dict:
-        """Score an approach based on heuristics and memory."""
-        score = 0.5  # baseline
-
-        # Penalty for high risk irreversible approaches
-        if approach.get("risk_level") == "high":
-            score -= 0.2
-
-        # Bonus for low complexity when task is not architecture
-        if approach.get("estimated_complexity") == "low":
-            score += 0.1
-
-        # Check consistency with past decisions in memory
-        if self.memory is not None:
-            try:
-                past_decisions = self.memory.search(
-                    query=f"{task} {approach['name']}",
-                    limit=3,
-                )
-                relevant_decisions = [
-                    d for d in past_decisions if d.get("type") == "decision"
-                ]
-                if relevant_decisions:
-                    score += 0.15  # past precedent supports this approach
-            except Exception as e:  # noqa: F841
-                pass  # graceful degradation
-
-        approach["score"] = round(score, 2)
-        return approach
+# -- Extracted modules (Phase R4) --
+from pawbot.agent.classifier import (  # noqa: E402
+    SYSTEM_1_MAX,
+    SYSTEM_1_5_MAX,
+    SYSTEM_2_MIN,
+    SYSTEM_PATHS,
+    ComplexityClassifier,
+    _FLEET_TRIGGER_KEYWORDS,
+    get_system_path,
+)
+from pawbot.agent.planner import ThoughtTreePlanner  # noqa: E402
 
 
 class AgentLoop:
@@ -275,6 +88,8 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        memory_db_path: str | None = None,
+        memory_session_id: str | None = None,
     ):
         from pawbot.config.schema import ExecToolConfig
         self.bus = bus
@@ -291,6 +106,13 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.memory_db_path = memory_db_path
+        self.memory_session_id = memory_session_id or f"workspace:{self.workspace}"
+        self.memory_config = (
+            {"memory": {"backends": {"sqlite": {"path": memory_db_path}}}}
+            if memory_db_path
+            else {}
+        )
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -319,6 +141,14 @@ class AgentLoop:
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._processing_lock = asyncio.Lock()
 
+        # ── Phase 1: Resilient LLM caller (retry + timeout) ──────────────────
+        from pawbot.providers.resilience import ResilientLLMCaller
+        self._llm_caller = ResilientLLMCaller(
+            max_retries=3,
+            timeout_seconds=120.0,
+            base_delay=1.0,
+        )
+
         # â”€â”€ Phase 2: Complexity classifier â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         self._classifier = ComplexityClassifier()
 
@@ -329,6 +159,9 @@ class AgentLoop:
 
         # â”€â”€ Phase 2: Memory router for Phase 2.2/2.3 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         self._memory_router = None  # Lazily initialized
+
+        # ── Phase 8: Browser engine (lazy init) ──────────────────────────────
+        self._browser_engine = None  # Set up in _register_default_tools if enabled
 
         self._register_default_tools()
 
@@ -349,6 +182,71 @@ class AgentLoop:
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+
+        # Phase 8: Browser tools (only when sandbox.browser.enabled = true)
+        self._try_register_browser_tools()
+
+    def _try_register_browser_tools(self) -> None:
+        """Register browser tools if enabled in config."""
+        try:
+            from pawbot.config.loader import load_config
+            config = load_config()
+            browser_cfg = config.sandbox.browser
+        except Exception:
+            return  # Config not available or sandbox not configured
+
+        if not browser_cfg.enabled:
+            return
+
+        from pawbot.agent.tools.browser_tool import BROWSER_TOOLS, get_browser_engine, set_browser_engine
+        from pawbot.browser.engine import BrowserEngine
+
+        # Create engine with config
+        engine = BrowserEngine(
+            headless=browser_cfg.headless,
+            blocked_domains=browser_cfg.blocked_domains,
+            allowed_domains=browser_cfg.allowed_domains,
+            max_pages=browser_cfg.max_pages,
+            page_timeout_ms=browser_cfg.page_timeout_ms,
+            persist_state=browser_cfg.persist_state,
+            js_execution=browser_cfg.js_execution,
+        )
+        set_browser_engine(engine)
+        self._browser_engine = engine
+
+        # Register all 5 browser tools
+        for tool_cls in BROWSER_TOOLS:
+            self.tools.register(tool_cls())
+
+        logger.info("Browser tools enabled ({} tools registered)", len(BROWSER_TOOLS))
+
+    def _get_filtered_tools(self) -> list[dict]:
+        """Get tool definitions filtered by agent allow/deny lists (Phase 9.4)."""
+        all_tools = self.tools.get_definitions()
+
+        try:
+            from pawbot.config.loader import load_config
+            config = load_config()
+            tools_cfg = config.agents.tools
+        except Exception:
+            return all_tools
+
+        if not tools_cfg.allow and not tools_cfg.deny:
+            return all_tools
+
+        import fnmatch
+        filtered = []
+        for tool in all_tools:
+            name = tool.get("function", {}).get("name", "")
+            # Deny list takes priority
+            if any(fnmatch.fnmatch(name, p) for p in tools_cfg.deny):
+                continue
+            # Allow list (empty = allow all)
+            if tools_cfg.allow:
+                if not any(fnmatch.fnmatch(name, p) for p in tools_cfg.allow):
+                    continue
+            filtered.append(tool)
+        return filtered
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -397,6 +295,82 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}â€¦")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    async def _process_tool_calls(
+        self,
+        response,
+        messages: list[dict],
+        tools_used: list[str],
+        execution_trace: list[dict],
+        on_progress: Callable[..., Awaitable[None]] | None = None,
+    ) -> list[dict]:
+        """Execute tool calls from one model response and append outputs to messages."""
+        if on_progress:
+            clean = self._strip_think(response.content)
+            if clean:
+                await on_progress(clean)
+            await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
+
+        tool_call_dicts = [
+            {
+                "id": tc.id,
+                "type": "function",
+                "function": {
+                    "name": tc.name,
+                    "arguments": json.dumps(tc.arguments, ensure_ascii=False),
+                },
+            }
+            for tc in response.tool_calls
+        ]
+        messages = self.context.add_assistant_message(
+            messages,
+            response.content,
+            tool_call_dicts,
+            reasoning_content=response.reasoning_content,
+            thinking_blocks=response.thinking_blocks,
+        )
+
+        for tool_call in response.tool_calls:
+            tools_used.append(tool_call.name)
+            args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
+            logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+            metrics.tool_calls.inc()
+            _tool_start = time.monotonic()
+            result = await self.tools.execute(tool_call.name, tool_call.arguments)
+            metrics.tool_latency.observe((time.monotonic() - _tool_start) * 1000)
+            messages = self.context.add_tool_result(
+                messages,
+                tool_call.id,
+                tool_call.name,
+                result,
+            )
+
+            trace_entry = {
+                "step": self.current_step,
+                "action": f"{tool_call.name}({args_str[:100]})",
+                "result": str(result)[:200] if result else "done",
+                "timestamp": int(time.time()),
+            }
+            execution_trace.append(trace_entry)
+
+            if result and isinstance(result, str) and (
+                result.startswith("Error:")
+                or result.startswith("error:")
+                or "traceback" in result.lower()[:200]
+            ):
+                metrics.tool_errors.inc()
+                self._record_failure(result[:200], tool_call.name)
+
+            selected_approach = self._session_meta.get("selected_approach")
+            if selected_approach and self.failure_count >= 5:
+                fallback = selected_approach.get("fallback")
+                if fallback and not self._session_meta.get("using_fallback_approach"):
+                    logger.info("ToT: switching to fallback approach '{}'", fallback.get("name"))
+                    self._session_meta["using_fallback_approach"] = True
+                    self._session_meta["active_approach"] = fallback
+                    self.failure_count = 0
+
+        return messages
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -418,73 +392,54 @@ class AgentLoop:
             iteration += 1
             self.current_step = iteration
 
-            response = await self.provider.chat(
-                messages=messages,
-                tools=self.tools.get_definitions(),
-                model=self.model,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-                reasoning_effort=self.reasoning_effort,
-            )
+            # ← Phase 2: compact context before every LLM call
+            messages = await compactor.compact_if_needed(messages, self.model)
 
-            if response.has_tool_calls:
-                if on_progress:
-                    clean = self._strip_think(response.content)
-                    if clean:
-                        await on_progress(clean)
-                    await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
-
-                tool_call_dicts = [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.name,
-                            "arguments": json.dumps(tc.arguments, ensure_ascii=False)
-                        }
-                    }
-                    for tc in response.tool_calls
-                ]
-                messages = self.context.add_assistant_message(
-                    messages, response.content, tool_call_dicts,
-                    reasoning_content=response.reasoning_content,
-                    thinking_blocks=response.thinking_blocks,
+            # ← Phase 1: context overflow protection
+            from pawbot.providers.context_limits import check_context_overflow
+            is_overflow, est_tokens, ctx_limit = check_context_overflow(messages, self.model)
+            if is_overflow:
+                logger.warning(
+                    "Context overflow detected: ~{} tokens > {} limit. Forcing compaction.",
+                    est_tokens, ctx_limit,
+                )
+                messages = await compactor.force_compact(
+                    messages, target_tokens=int(ctx_limit * 0.7)
                 )
 
-                for tool_call in response.tool_calls:
-                    tools_used.append(tool_call.name)
-                    args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
-                    logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
-                    messages = self.context.add_tool_result(
-                        messages, tool_call.id, tool_call.name, result
-                    )
+            # ← Phase 1: resilient LLM call with retry + timeout
+            # ← Phase 7: metrics instrumentation
+            metrics.llm_calls.inc()
+            _llm_start = time.monotonic()
+            try:
+                response = await self._llm_caller.call(
+                    self.provider.chat,
+                    messages=messages,
+                    tools=self._get_filtered_tools(),
+                    model=self.model,
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                    reasoning_effort=self.reasoning_effort,
+                )
+            except Exception:
+                metrics.llm_errors.inc()
+                raise
+            finally:
+                metrics.llm_latency.observe((time.monotonic() - _llm_start) * 1000)
 
-                    # â”€â”€ Phase 2.5: Track execution trace and detect failures â”€â”€
-                    trace_entry = {
-                        "step": iteration,
-                        "action": f"{tool_call.name}({args_str[:100]})",
-                        "result": str(result)[:200] if result else "done",
-                        "timestamp": int(time.time()),
-                    }
-                    execution_trace.append(trace_entry)
+            # Track token usage if available
+            if response.usage:
+                metrics.llm_tokens_in.inc(response.usage.get("prompt_tokens", 0))
+                metrics.llm_tokens_out.inc(response.usage.get("completion_tokens", 0))
 
-                    # Detect failure: error responses from tools
-                    if result and isinstance(result, str) and (
-                        result.startswith("Error:") or result.startswith("error:")
-                        or "traceback" in result.lower()[:200]
-                    ):
-                        self._record_failure(result[:200], tool_call.name)
-
-                    # â”€â”€ Phase 2.4: ToT fallback check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-                    selected_approach = self._session_meta.get("selected_approach")
-                    if selected_approach and self.failure_count >= 5:
-                        fallback = selected_approach.get("fallback")
-                        if fallback and not self._session_meta.get("using_fallback_approach"):
-                            logger.info("ToT: switching to fallback approach '{}'", fallback.get("name"))
-                            self._session_meta["using_fallback_approach"] = True
-                            self._session_meta["active_approach"] = fallback
-                            self.failure_count = 0
+            if response.has_tool_calls:
+                messages = await self._process_tool_calls(
+                    response=response,
+                    messages=messages,
+                    tools_used=tools_used,
+                    execution_trace=execution_trace,
+                    on_progress=on_progress,
+                )
 
             else:
                 clean = self._strip_think(response.content)
@@ -517,18 +472,82 @@ class AgentLoop:
         await self._connect_mcp()
         logger.info("Agent loop started")
 
+        # ── Phase 1: Register graceful shutdown handler ───────────────────
+        import signal
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(sig, lambda: asyncio.create_task(self._graceful_shutdown()))
+            except NotImplementedError:
+                # Windows doesn't support add_signal_handler for SIGTERM
+                pass
+
         while self._running:
             try:
                 msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
             except asyncio.TimeoutError:
                 continue
+            except asyncio.CancelledError:
+                break
 
             if msg.content.strip().lower() == "/stop":
                 await self._handle_stop(msg)
             else:
                 task = asyncio.create_task(self._dispatch(msg))
                 self._active_tasks.setdefault(msg.session_key, []).append(task)
-                task.add_done_callback(lambda t, k=msg.session_key: self._active_tasks.get(k, []) and self._active_tasks[k].remove(t) if t in self._active_tasks.get(k, []) else None)
+                task.add_done_callback(
+                    lambda t, k=msg.session_key: (
+                        self._active_tasks.get(k, []).remove(t)
+                        if t in self._active_tasks.get(k, [])
+                        else None
+                    )
+                )
+
+    async def _graceful_shutdown(self) -> None:
+        """Graceful shutdown: cancel active tasks, flush state, close MCP."""
+        logger.info("Graceful shutdown initiated...")
+        self._running = False
+
+        # 1. Cancel all active tasks
+        all_tasks = []
+        for session_tasks in self._active_tasks.values():
+            all_tasks.extend(session_tasks)
+
+        for task in all_tasks:
+            if not task.done():
+                task.cancel()
+
+        if all_tasks:
+            await asyncio.gather(*all_tasks, return_exceptions=True)
+            logger.info("Cancelled {} active tasks", len(all_tasks))
+
+        # 2. Cancel subagents
+        try:
+            cancelled = await self.subagents.cancel_all()
+            if cancelled:
+                logger.info("Cancelled {} subagents", cancelled)
+        except Exception:
+            logger.exception("Error cancelling subagents during shutdown")
+
+        # 3. Save all sessions
+        try:
+            self.sessions.save_all()
+            logger.info("Sessions saved")
+        except Exception:
+            logger.exception("Error saving sessions during shutdown")
+
+        # 4. Close MCP connections
+        await self.close_mcp()
+
+        # 5. Stop browser engine (Phase 8)
+        if self._browser_engine:
+            try:
+                await self._browser_engine.stop()
+                logger.info("Browser engine stopped")
+            except Exception:
+                logger.exception("Error stopping browser during shutdown")
+
+        logger.info("Graceful shutdown complete")
 
     async def _handle_stop(self, msg: InboundMessage) -> None:
         """Cancel all active tasks and subagents for the session."""
@@ -582,45 +601,55 @@ class AgentLoop:
         self._running = False
         logger.info("Agent loop stopping")
 
-    async def _process_message(
+    def _setup_session(
         self,
         msg: InboundMessage,
-        session_key: str | None = None,
-        on_progress: Callable[[str], Awaitable[None]] | None = None,
-    ) -> OutboundMessage | None:
-        """Process a single inbound message and return the response."""
-        # â”€â”€ Phase 2.5: Reset self-correction state for each message â”€â”€â”€â”€â”€
-        self.failure_count = 0
-        self.failure_log = []
-        self.current_step = 0
-        self._session_meta = {}  # Per-message metadata for Phase 2
-
-        # System messages: parse origin from chat_id ("channel:chat_id")
-        if msg.channel == "system":
-            channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id
-                                else ("cli", msg.chat_id))
-            logger.info("Processing system message from {}", msg.sender_id)
-            key = f"{channel}:{chat_id}"
-            session = self.sessions.get_or_create(key)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
-            history = session.get_history(max_messages=self.memory_window)
-            messages = self.context.build_messages(
-                history=history,
-                current_message=msg.content, channel=channel, chat_id=chat_id,
-            )
-            final_content, _, all_msgs, _ = await self._run_agent_loop(messages)
-            self._save_turn(session, all_msgs, 1 + len(history))
-            self.sessions.save(session)
-            return OutboundMessage(channel=channel, chat_id=chat_id,
-                                  content=final_content or "Background task completed.")
-
-        preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
-        logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
-
+        session_key: str | None,
+    ) -> tuple[str, Session]:
+        """Resolve session key and return the active session object."""
         key = session_key or msg.session_key
-        session = self.sessions.get_or_create(key)
+        return key, self.sessions.get_or_create(key)
 
-        # Slash commands
+    async def _handle_system_message(self, msg: InboundMessage) -> OutboundMessage:
+        """Handle internal system channel messages."""
+        channel, chat_id = (
+            msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
+        )
+        logger.info("Processing system message from {}", msg.sender_id)
+        key = f"{channel}:{chat_id}"
+        session = self.sessions.get_or_create(key)
+        self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
+        history = session.get_history(max_messages=self.memory_window)
+        messages = self.context.build_messages(
+            history=history,
+            current_message=msg.content,
+            channel=channel,
+            chat_id=chat_id,
+        )
+        final_content, _, all_msgs, _ = await self._run_agent_loop(messages)
+        self._save_turn(session, all_msgs, 1 + len(history))
+        self.sessions.save(session)
+        return OutboundMessage(
+            channel=channel,
+            chat_id=chat_id,
+            content=final_content or "Background task completed.",
+        )
+
+    @staticmethod
+    def _help_text() -> str:
+        return (
+            "pawbot commands:\n"
+            "/new - Start a new conversation\n"
+            "/stop - Stop the current task\n"
+            "/help - Show available commands"
+        )
+
+    async def _handle_slash_command(
+        self,
+        msg: InboundMessage,
+        session: Session,
+    ) -> OutboundMessage | None:
+        """Handle slash commands. Return None when message is not a command."""
         cmd = msg.content.strip().lower()
         if cmd == "/new":
             lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
@@ -633,13 +662,15 @@ class AgentLoop:
                         temp.messages = list(snapshot)
                         if not await self._consolidate_memory(temp, archive_all=True):
                             return OutboundMessage(
-                                channel=msg.channel, chat_id=msg.chat_id,
+                                channel=msg.channel,
+                                chat_id=msg.chat_id,
                                 content="Memory archival failed, session not cleared. Please try again.",
                             )
-            except Exception as e:  # noqa: F841
+            except Exception:
                 logger.exception("/new archival failed for {}", session.key)
                 return OutboundMessage(
-                    channel=msg.channel, chat_id=msg.chat_id,
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
                     content="Memory archival failed, session not cleared. Please try again.",
                 )
             finally:
@@ -648,18 +679,91 @@ class AgentLoop:
             session.clear()
             self.sessions.save(session)
             self.sessions.invalidate(session.key)
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="New session started.")
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="New session started.",
+            )
         if cmd == "/help":
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="ðŸˆ pawbot commands:\n/new â€” Start a new conversation\n/stop â€” Stop the current task\n/help â€” Show available commands")
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=self._help_text(),
+            )
+        return None
 
-        # â”€â”€ Phase 2.1: Classify complexity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    def _build_response(
+        self,
+        msg: InboundMessage,
+        final_content: str,
+        all_msgs: list[dict],
+        session: Session,
+        history_len: int,
+    ) -> OutboundMessage:
+        """Persist turn state and build the outbound response."""
+        leaks = scan_output(final_content or "")
+        if leaks:
+            logger.warning("Detected {} secret(s) in output, redacting", len(leaks))
+            final_content = redact_secrets(final_content or "")
+            for entry in reversed(all_msgs):
+                if entry.get("role") == "assistant" and entry.get("content"):
+                    entry["content"] = final_content
+                    break
+
+        self._save_turn(session, all_msgs, 1 + history_len)
+        self.sessions.save(session)
+        try:
+            from pawbot.canvas.server import record_canvas_session
+
+            record_canvas_session(
+                session.key,
+                final_content,
+                metadata={
+                    "agent_id": (msg.metadata or {}).get("agent_id", ""),
+                    "channel": msg.channel,
+                    "chat_id": msg.chat_id,
+                },
+            )
+        except Exception as exc:
+            logger.debug("Canvas session record skipped: {}", exc)
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=final_content,
+            metadata=msg.metadata or {},
+        )
+
+    async def _process_message(
+        self,
+        msg: InboundMessage,
+        session_key: str | None = None,
+        on_progress: Callable[[str], Awaitable[None]] | None = None,
+    ) -> OutboundMessage | None:
+        """Process a single inbound message and return the response."""
+        # ── Phase 7: Track message processing ─────────────────────────────
+        metrics.messages_processed.inc()
+        # â”€â”€ Phase 2.5: Reset self-correction state for each message â”€â”€â”€â”€â”€
+        self.failure_count = 0
+        self.failure_log = []
+        self.current_step = 0
+        self._session_meta = {}  # Per-message metadata for Phase 2
+
+        if msg.channel == "system":
+            return await self._handle_system_message(msg)
+
+        preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
+        logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
+
+        key, session = self._setup_session(msg, session_key)
+
+        slash_result = await self._handle_slash_command(msg, session)
+        if slash_result is not None:
+            return slash_result
+
         complexity_score = self._classifier.score(msg.content)
         system_path = get_system_path(complexity_score)
         path_config = SYSTEM_PATHS[system_path]
 
-        # Store in session metadata so context.py can read it
         self._session_meta["complexity_score"] = complexity_score
         self._session_meta["system_path"] = system_path
         self._session_meta["context_mode"] = path_config["context_mode"]
@@ -669,10 +773,26 @@ class AgentLoop:
 
         logger.info("Complexity: {:.2f} â†’ {}", complexity_score, system_path)
 
-        # â”€â”€ Phase 2.2: Pre-task reflection (System 2 only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                # Phase 18: Fleet Commander delegation for multi-agent tasks
+        if self._is_fleet_worthy(msg.content, complexity_score):
+            try:
+                from pawbot.fleet.commander import FleetCommander
+                from pawbot.fleet.models import FleetConfig
+                commander = FleetCommander(
+                    config=FleetConfig(),
+                    workspace=self.workspace,
+                    memory_router=self._get_memory_router(),
+                )
+                fleet_result = await commander.plan_and_execute(msg.content)
+                return self._build_response(
+                    msg, fleet_result, [], session, 0,
+                )
+            except Exception as exc:
+                logger.warning("Fleet delegation failed, falling back to agent loop: {}", exc)
+
         if path_config.get("pre_task_reflection") and system_path == "system_2":
             self._run_pre_task_reflection(msg.content, session)
-        # Phase 13: load relevant runtime skills for System 2 tasks.
+
         skill_names: list[str] = []
         if system_path == "system_2":
             try:
@@ -684,7 +804,6 @@ class AgentLoop:
             except Exception as e:
                 logger.warning("Skill loading failed, proceeding without skills: {}", e)
 
-        # â”€â”€ Phase 2.4: Plan with Tree of Thoughts (System 2 only) â”€â”€â”€â”€â”€
         if path_config.get("use_tree_of_thoughts"):
             task_type = session.metadata.get("task_type", "general")
             if task_type in ["coding_task", "architecture"]:
@@ -697,68 +816,68 @@ class AgentLoop:
                 except Exception as e:
                     logger.warning("ToT planning failed, proceeding without: {}", e)
 
-        # â”€â”€ Phase 2.1: Override max_iterations from path config â”€â”€â”€â”€â”€â”€â”€
         saved_max_iterations = self.max_iterations
         self.max_iterations = max(path_config.get("max_iterations", self.max_iterations), self.max_iterations)
+        try:
+            unconsolidated = len(session.messages) - session.last_consolidated
+            if unconsolidated >= self.memory_window and session.key not in self._consolidating:
+                self._consolidating.add(session.key)
+                lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
 
-        unconsolidated = len(session.messages) - session.last_consolidated
-        if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
-            self._consolidating.add(session.key)
-            lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
+                async def _consolidate_and_unlock():
+                    try:
+                        async with lock:
+                            await self._consolidate_memory(session)
+                    finally:
+                        self._consolidating.discard(session.key)
+                        _task = asyncio.current_task()
+                        if _task is not None:
+                            self._consolidation_tasks.discard(_task)
 
-            async def _consolidate_and_unlock():
-                try:
-                    async with lock:
-                        await self._consolidate_memory(session)
-                finally:
-                    self._consolidating.discard(session.key)
-                    _task = asyncio.current_task()
-                    if _task is not None:
-                        self._consolidation_tasks.discard(_task)
+                _task = asyncio.create_task(_consolidate_and_unlock())
+                self._consolidation_tasks.add(_task)
 
-            _task = asyncio.create_task(_consolidate_and_unlock())
-            self._consolidation_tasks.add(_task)
+            self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
+            if message_tool := self.tools.get("message"):
+                if isinstance(message_tool, MessageTool):
+                    message_tool.start_turn()
 
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
-        if message_tool := self.tools.get("message"):
-            if isinstance(message_tool, MessageTool):
-                message_tool.start_turn()
+            history = session.get_history(max_messages=self.memory_window)
+            initial_messages = self.context.build_messages(
+                history=history,
+                current_message=msg.content,
+                skill_names=skill_names,
+                media=msg.media if msg.media else None,
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+            )
 
-        history = session.get_history(max_messages=self.memory_window)
-        initial_messages = self.context.build_messages(
-            history=history,
-            current_message=msg.content,
-            skill_names=skill_names,
-            media=msg.media if msg.media else None,
-            channel=msg.channel, chat_id=msg.chat_id,
-        )
+            async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
+                meta = dict(msg.metadata or {})
+                meta["_progress"] = True
+                meta["_tool_hint"] = tool_hint
+                await self.bus.publish_outbound(
+                    OutboundMessage(
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        content=content,
+                        metadata=meta,
+                    )
+                )
 
-        async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
-            meta = dict(msg.metadata or {})
-            meta["_progress"] = True
-            meta["_tool_hint"] = tool_hint
-            await self.bus.publish_outbound(OutboundMessage(
-                channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
-            ))
-
-        final_content, _, all_msgs, execution_trace = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
-        )
-
-        # Restore max_iterations
-        self.max_iterations = saved_max_iterations
+            final_content, _, all_msgs, execution_trace = await self._run_agent_loop(
+                initial_messages,
+                on_progress=on_progress or _bus_progress,
+            )
+        finally:
+            self.max_iterations = saved_max_iterations
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
 
-        # Determine success for post-task learning
         loop_success = self.failure_count == 0
         last_error = self.failure_log[-1]["error"] if self.failure_log else None
 
-        self._save_turn(session, all_msgs, 1 + len(history))
-        self.sessions.save(session)
-
-        # â”€â”€ Phase 2.3: Post-task learning (async, never blocks response) â”€â”€
         self._run_post_task_learning(
             task=msg.content,
             success=loop_success,
@@ -767,19 +886,32 @@ class AgentLoop:
             session_key=key,
         )
 
+        response = self._build_response(msg, final_content, all_msgs, session, len(history))
+
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None
 
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
+        preview = response.content[:120] + "..." if len(response.content) > 120 else response.content
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
-        return OutboundMessage(
-            channel=msg.channel, chat_id=msg.chat_id, content=final_content,
-            metadata=msg.metadata or {},
-        )
+        return response
 
     # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     # Phase 2 â€” Helper Methods
     # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+        # Phase 18: Fleet-worthiness check
+    @staticmethod
+    def _is_fleet_worthy(content: str, complexity_score: float) -> bool:
+        """Check if a message should be delegated to Fleet Commander.
+
+        A task is fleet-worthy when:
+        - Complexity score >= 0.8 (deep system_2 territory), AND
+        - The message contains fleet trigger keywords suggesting multi-agent work
+        """
+        if complexity_score < 0.8:
+            return False
+        content_lower = content.lower()
+        return any(kw in content_lower for kw in _FLEET_TRIGGER_KEYWORDS)
 
     def _get_memory_router(self):
         """Lazily initialize and return a MemoryRouter instance."""
@@ -787,8 +919,8 @@ class AgentLoop:
             try:
                 from pawbot.agent.memory import MemoryRouter
                 self._memory_router = MemoryRouter(
-                    session_id="agent_loop",
-                    config={},
+                    session_id=self.memory_session_id,
+                    config=self.memory_config,
                 )
             except Exception as e:
                 logger.warning("MemoryRouter init failed: {} â€” Phase 2 memory features degraded", e)
@@ -1088,7 +1220,11 @@ class AgentLoop:
 
     async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
         """Delegate to MemoryStore.consolidate(). Returns True on success."""
-        return await MemoryStore(self.workspace).consolidate(
+        return await MemoryStore(
+            self.workspace,
+            session_id=self.memory_session_id,
+            memory_config=self.memory_config,
+        ).consolidate(
             session, self.provider, self.model,
             archive_all=archive_all, memory_window=self.memory_window,
         )

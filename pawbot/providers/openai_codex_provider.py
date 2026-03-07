@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from typing import Any, AsyncGenerator
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, Callable
 
 import httpx
 from loguru import logger
@@ -228,7 +229,7 @@ async def _iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], 
     async for line in response.aiter_lines():
         if line == "":
             if buffer:
-                data_lines = [l[5:].strip() for l in buffer if l.startswith("data:")]
+                data_lines = [line[5:].strip() for line in buffer if line.startswith("data:")]
                 buffer = []
                 if not data_lines:
                     continue
@@ -243,61 +244,102 @@ async def _iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], 
         buffer.append(line)
 
 
+@dataclass
+class _SSEState:
+    """Mutable accumulator for one Codex SSE response stream."""
+
+    content: str = ""
+    tool_call_buffers: dict[str, dict[str, Any]] = field(default_factory=dict)
+    tool_calls: list[ToolCallRequest] = field(default_factory=list)
+    finish_reason: str = "stop"
+
+
+def _sse_output_item_added(event: dict[str, Any], state: _SSEState) -> None:
+    """Buffer a new function call when it first appears."""
+    item = event.get("item") or {}
+    call_id = item.get("call_id")
+    if item.get("type") == "function_call" and call_id:
+        state.tool_call_buffers[call_id] = {
+            "id": item.get("id") or "fc_0",
+            "name": item.get("name"),
+            "arguments": item.get("arguments") or "",
+        }
+
+
+def _sse_output_text_delta(event: dict[str, Any], state: _SSEState) -> None:
+    """Append streamed text chunks to the accumulated content."""
+    state.content += event.get("delta") or ""
+
+
+def _sse_fn_args_delta(event: dict[str, Any], state: _SSEState) -> None:
+    """Append argument fragment to the matching buffered tool call."""
+    call_id = event.get("call_id")
+    if call_id and call_id in state.tool_call_buffers:
+        state.tool_call_buffers[call_id]["arguments"] += event.get("delta") or ""
+
+
+def _sse_fn_args_done(event: dict[str, Any], state: _SSEState) -> None:
+    """Overwrite buffered argument fragments with final argument payload."""
+    call_id = event.get("call_id")
+    if call_id and call_id in state.tool_call_buffers:
+        state.tool_call_buffers[call_id]["arguments"] = event.get("arguments") or ""
+
+
+def _sse_output_item_done(event: dict[str, Any], state: _SSEState) -> None:
+    """Flush a completed function call item into the final tool call list."""
+    item = event.get("item") or {}
+    if item.get("type") != "function_call":
+        return
+    call_id = item.get("call_id")
+    if not call_id:
+        return
+    buf = state.tool_call_buffers.get(call_id) or {}
+    args_raw = buf.get("arguments") or item.get("arguments") or "{}"
+    try:
+        args = json.loads(args_raw)
+    except Exception:
+        args = {"raw": args_raw}
+    state.tool_calls.append(
+        ToolCallRequest(
+            id=f"{call_id}|{buf.get('id') or item.get('id') or 'fc_0'}",
+            name=buf.get("name") or item.get("name"),
+            arguments=args,
+        )
+    )
+
+
+def _sse_response_completed(event: dict[str, Any], state: _SSEState) -> None:
+    """Map final SSE response status to finish_reason."""
+    status = (event.get("response") or {}).get("status")
+    state.finish_reason = _map_finish_reason(status)
+
+
+def _sse_error(event: dict[str, Any], state: _SSEState) -> None:
+    """Raise on terminal error events."""
+    _ = event
+    _ = state
+    raise RuntimeError("Codex response failed")
+
+
+_SSE_HANDLERS: dict[str, Callable[[dict[str, Any], _SSEState], None]] = {
+    "response.output_item.added": _sse_output_item_added,
+    "response.output_text.delta": _sse_output_text_delta,
+    "response.function_call_arguments.delta": _sse_fn_args_delta,
+    "response.function_call_arguments.done": _sse_fn_args_done,
+    "response.output_item.done": _sse_output_item_done,
+    "response.completed": _sse_response_completed,
+    "error": _sse_error,
+    "response.failed": _sse_error,
+}
+
+
 async def _consume_sse(response: httpx.Response) -> tuple[str, list[ToolCallRequest], str]:
-    content = ""
-    tool_calls: list[ToolCallRequest] = []
-    tool_call_buffers: dict[str, dict[str, Any]] = {}
-    finish_reason = "stop"
-
+    state = _SSEState()
     async for event in _iter_sse(response):
-        event_type = event.get("type")
-        if event_type == "response.output_item.added":
-            item = event.get("item") or {}
-            if item.get("type") == "function_call":
-                call_id = item.get("call_id")
-                if not call_id:
-                    continue
-                tool_call_buffers[call_id] = {
-                    "id": item.get("id") or "fc_0",
-                    "name": item.get("name"),
-                    "arguments": item.get("arguments") or "",
-                }
-        elif event_type == "response.output_text.delta":
-            content += event.get("delta") or ""
-        elif event_type == "response.function_call_arguments.delta":
-            call_id = event.get("call_id")
-            if call_id and call_id in tool_call_buffers:
-                tool_call_buffers[call_id]["arguments"] += event.get("delta") or ""
-        elif event_type == "response.function_call_arguments.done":
-            call_id = event.get("call_id")
-            if call_id and call_id in tool_call_buffers:
-                tool_call_buffers[call_id]["arguments"] = event.get("arguments") or ""
-        elif event_type == "response.output_item.done":
-            item = event.get("item") or {}
-            if item.get("type") == "function_call":
-                call_id = item.get("call_id")
-                if not call_id:
-                    continue
-                buf = tool_call_buffers.get(call_id) or {}
-                args_raw = buf.get("arguments") or item.get("arguments") or "{}"
-                try:
-                    args = json.loads(args_raw)
-                except Exception as e:  # noqa: F841
-                    args = {"raw": args_raw}
-                tool_calls.append(
-                    ToolCallRequest(
-                        id=f"{call_id}|{buf.get('id') or item.get('id') or 'fc_0'}",
-                        name=buf.get("name") or item.get("name"),
-                        arguments=args,
-                    )
-                )
-        elif event_type == "response.completed":
-            status = (event.get("response") or {}).get("status")
-            finish_reason = _map_finish_reason(status)
-        elif event_type in {"error", "response.failed"}:
-            raise RuntimeError("Codex response failed")
-
-    return content, tool_calls, finish_reason
+        handler = _SSE_HANDLERS.get(event.get("type", ""))
+        if handler:
+            handler(event, state)
+    return state.content, state.tool_calls, state.finish_reason
 
 
 _FINISH_REASON_MAP = {"completed": "stop", "incomplete": "length", "failed": "error", "cancelled": "error"}

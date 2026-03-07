@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shlex
 import shutil
 import socket
 import subprocess
@@ -119,6 +120,27 @@ def _truncate(text: str | None, limit: int) -> str:
     return (text or "")[:limit]
 
 
+def _command_to_argv(command: str) -> list[str]:
+    """Convert command string to argv, preserving Windows shell built-ins."""
+    if os.name == "nt":
+        try:
+            parts = shlex.split(command, posix=False)
+        except ValueError:
+            parts = []
+        if parts:
+            builtins = {
+                "assoc", "break", "call", "cd", "chdir", "cls", "color", "copy", "date",
+                "del", "dir", "echo", "endlocal", "erase", "for", "ftype", "goto", "if",
+                "md", "mkdir", "mklink", "move", "path", "pause", "popd", "prompt",
+                "pushd", "rd", "ren", "rename", "rmdir", "set", "setlocal", "shift",
+                "start", "time", "title", "type", "ver", "verify", "vol",
+            }
+            if parts[0].lower() in builtins:
+                return ["cmd", "/c", command]
+        return shlex.split(command, posix=False)
+    return shlex.split(command)
+
+
 def _require_psutil() -> dict[str, Any] | None:
     if psutil is None:
         return {"error": "psutil is not installed"}
@@ -186,9 +208,10 @@ def server_run(
 
     if background:
         try:
+            argv = _command_to_argv(command)
             proc = subprocess.Popen(
-                command,
-                shell=True,
+                argv,
+                shell=False,
                 cwd=run_cwd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -199,9 +222,10 @@ def server_run(
             return {"error": str(exc), "command": command}
 
     try:
+        argv = _command_to_argv(command)
         result = subprocess.run(
-            command,
-            shell=True,
+            argv,
+            shell=False,
             cwd=run_cwd,
             timeout=timeout,
             capture_output=True,
@@ -549,90 +573,107 @@ def server_ports() -> dict[str, Any]:
         return {"error": str(exc)}
 
 
+def _nginx_test() -> dict[str, Any]:
+    """Run nginx config validation."""
+    result = _run_command(["nginx", "-t"], timeout=20)
+    if "error" in result:
+        return result
+    output = result.get("stderr") or result.get("stdout") or ""
+    return {"ok": result.get("returncode", 1) == 0, "output": _truncate(output, 2000)}
+
+
+def _nginx_reload() -> dict[str, Any]:
+    """Validate nginx config and reload service when valid."""
+    test = _nginx_test()
+    if not test.get("ok"):
+        return {"error": "nginx config test failed", "details": test.get("output", "")}
+    result = _run_command(["systemctl", "reload", "nginx"], timeout=30)
+    if "error" in result:
+        return result
+    return {"reloaded": result.get("returncode", 1) == 0}
+
+
+def _nginx_list_vhosts(sites_available: Path) -> dict[str, Any]:
+    """List vhost files from nginx sites-available directory."""
+    if not sites_available.exists():
+        return {"vhosts": []}
+    vhosts = [entry.name for entry in sorted(sites_available.iterdir()) if entry.is_file()]
+    return {"vhosts": vhosts}
+
+
+def _nginx_add_vhost(
+    domain: str,
+    config: str,
+    sites_available: Path,
+    sites_enabled: Path,
+) -> dict[str, Any]:
+    """Add vhost config and enable it, with rollback on failed nginx test."""
+    if not domain or not config:
+        return {"error": "domain and config required for add_vhost"}
+    try:
+        sites_available.mkdir(parents=True, exist_ok=True)
+        sites_enabled.mkdir(parents=True, exist_ok=True)
+        avail_path = sites_available / domain
+        enabled_path = sites_enabled / domain
+
+        avail_path.write_text(config, encoding="utf-8")
+        if not enabled_path.exists():
+            try:
+                enabled_path.symlink_to(avail_path)
+            except Exception:
+                shutil.copy2(avail_path, enabled_path)
+
+        test = _nginx_test()
+        if not test.get("ok"):
+            for rollback_path in (avail_path, enabled_path):
+                if rollback_path.exists():
+                    rollback_path.unlink()
+            return {"error": "nginx config test failed", "details": test.get("output", "")}
+
+        _nginx_reload()
+        logger.info("NGINX: added vhost for %r", domain)
+        return {"added": True, "domain": domain, "path": str(avail_path)}
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+def _nginx_remove_vhost(
+    domain: str,
+    sites_available: Path,
+    sites_enabled: Path,
+) -> dict[str, Any]:
+    """Remove vhost config and enabled link, then reload nginx."""
+    if not domain:
+        return {"error": "domain is required for remove_vhost"}
+    try:
+        for path in (sites_available / domain, sites_enabled / domain):
+            if path.exists():
+                path.unlink()
+        _nginx_reload()
+        logger.info("NGINX: removed vhost for %r", domain)
+        return {"removed": True, "domain": domain}
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
 @mcp.tool()
 def server_nginx(action: str, domain: str = "", config: str = "") -> dict[str, Any]:
     """Manage nginx operations and vhosts."""
     sites_available = Path("/etc/nginx/sites-available")
     sites_enabled = Path("/etc/nginx/sites-enabled")
+    actions: dict[str, Any] = {
+        "test": _nginx_test,
+        "reload": _nginx_reload,
+        "status": lambda: service_control("nginx", "status"),
+        "list_vhosts": lambda: _nginx_list_vhosts(sites_available),
+        "add_vhost": lambda: _nginx_add_vhost(domain, config, sites_available, sites_enabled),
+        "remove_vhost": lambda: _nginx_remove_vhost(domain, sites_available, sites_enabled),
+    }
 
-    if action == "test":
-        result = _run_command(["nginx", "-t"], timeout=20)
-        if "error" in result:
-            return result
-        output = result.get("stderr") or result.get("stdout") or ""
-        return {"ok": result.get("returncode", 1) == 0, "output": _truncate(output, 2000)}
-
-    if action == "reload":
-        test = server_nginx("test")
-        if not test.get("ok"):
-            return {"error": "nginx config test failed", "details": test.get("output", "")}
-        result = _run_command(["systemctl", "reload", "nginx"], timeout=30)
-        if "error" in result:
-            return result
-        return {"reloaded": result.get("returncode", 1) == 0}
-
-    if action == "status":
-        return service_control("nginx", "status")
-
-    if action == "list_vhosts":
-        if not sites_available.exists():
-            return {"vhosts": []}
-        vhosts = [entry.name for entry in sorted(sites_available.iterdir()) if entry.is_file()]
-        return {"vhosts": vhosts}
-
-    if action == "add_vhost":
-        if not domain or not config:
-            return {"error": "domain and config required for add_vhost"}
-        try:
-            sites_available.mkdir(parents=True, exist_ok=True)
-            sites_enabled.mkdir(parents=True, exist_ok=True)
-            avail_path = sites_available / domain
-            enabled_path = sites_enabled / domain
-
-            avail_path.write_text(config, encoding="utf-8")
-            if not enabled_path.exists():
-                try:
-                    enabled_path.symlink_to(avail_path)
-                except Exception:
-                    shutil.copy2(avail_path, enabled_path)
-
-            test = server_nginx("test")
-            if not test.get("ok"):
-                try:
-                    avail_path.unlink(missing_ok=True)  # type: ignore[arg-type]
-                except TypeError:
-                    if avail_path.exists():
-                        avail_path.unlink()
-                try:
-                    enabled_path.unlink(missing_ok=True)  # type: ignore[arg-type]
-                except TypeError:
-                    if enabled_path.exists():
-                        enabled_path.unlink()
-                return {"error": "nginx config test failed", "details": test.get("output", "")}
-
-            server_nginx("reload")
-            logger.info("NGINX: added vhost for %r", domain)
-            return {"added": True, "domain": domain, "path": str(avail_path)}
-        except Exception as exc:
-            return {"error": str(exc)}
-
-    if action == "remove_vhost":
-        if not domain:
-            return {"error": "domain is required for remove_vhost"}
-        avail_path = sites_available / domain
-        enabled_path = sites_enabled / domain
-        try:
-            if avail_path.exists():
-                avail_path.unlink()
-            if enabled_path.exists():
-                enabled_path.unlink()
-            server_nginx("reload")
-            logger.info("NGINX: removed vhost for %r", domain)
-            return {"removed": True, "domain": domain}
-        except Exception as exc:
-            return {"error": str(exc)}
-
-    return {"error": f"Unknown action: {action}"}
+    handler = actions.get(action)
+    if handler is None:
+        return {"error": f"Unknown action: {action}"}
+    return handler()
 
 
 def _load_registry(path: str) -> dict[str, Any]:

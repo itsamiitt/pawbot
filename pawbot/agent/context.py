@@ -24,8 +24,7 @@ from pawbot.agent.memory import MemoryStore
 from pawbot.agent.skills import SkillsLoader
 
 if TYPE_CHECKING:
-    from pawbot.providers.base import LLMProvider
-    from pawbot.session.manager import Session
+    pass
 
 
 # ─── Phase 3.1: Token Counting ──────────────────────────────────────────────
@@ -789,7 +788,6 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         """Log cache hit rate from Anthropic API response usage field."""
         usage = api_response.get("usage", {})
         cache_read = usage.get("cache_read_input_tokens", 0)
-        cache_write = usage.get("cache_creation_input_tokens", 0)
         total = usage.get("input_tokens", 1)
         if cache_read > 0:
             hit_rate = cache_read / total

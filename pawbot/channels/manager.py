@@ -7,7 +7,7 @@ import hashlib
 import json
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, NamedTuple
 
 from loguru import logger
 
@@ -15,6 +15,43 @@ from pawbot.bus.events import OutboundMessage
 from pawbot.bus.queue import MessageBus
 from pawbot.channels.base import BaseChannel
 from pawbot.config.schema import Config
+from pawbot.delivery.queue import DeliveryQueue
+
+
+# ── Channel registry ─────────────────────────────────────────────────────────
+
+class _ChannelEntry(NamedTuple):
+    """Registry entry for a single channel type."""
+    config_attr:  str                    # attribute on config.channels, e.g. "telegram"
+    import_path:  str                    # dotted module path
+    class_name:   str                    # class name in that module
+    extra_kwargs: Callable[[Any], dict]  # function(full_config) -> extra kwargs
+
+
+def _no_extra(cfg: Any) -> dict:
+    """Most channels need no extra kwargs beyond (channel_cfg, bus)."""
+    return {}
+
+
+# To add a new channel: append one _ChannelEntry here — no other code changes needed.
+_CHANNEL_REGISTRY: list[_ChannelEntry] = [
+    _ChannelEntry(
+        "telegram",
+        "pawbot.channels.telegram",
+        "TelegramChannel",
+        lambda cfg: {"groq_api_key": cfg.providers.groq.api_key},
+    ),
+    _ChannelEntry("whatsapp", "pawbot.channels.whatsapp",  "WhatsAppChannel",  _no_extra),
+    _ChannelEntry("discord",  "pawbot.channels.discord",   "DiscordChannel",   _no_extra),
+    _ChannelEntry("feishu",   "pawbot.channels.feishu",    "FeishuChannel",    _no_extra),
+    _ChannelEntry("mochat",   "pawbot.channels.mochat",    "MochatChannel",    _no_extra),
+    _ChannelEntry("dingtalk", "pawbot.channels.dingtalk",  "DingTalkChannel",  _no_extra),
+    _ChannelEntry("email",    "pawbot.channels.email",     "EmailChannel",     _no_extra),
+    _ChannelEntry("slack",    "pawbot.channels.slack",     "SlackChannel",     _no_extra),
+    _ChannelEntry("qq",       "pawbot.channels.qq",        "QQChannel",        _no_extra),
+    _ChannelEntry("matrix",   "pawbot.channels.matrix",    "MatrixChannel",    _no_extra),
+]
+
 
 
 class ChannelManager:
@@ -27,7 +64,12 @@ class ChannelManager:
     - Route outbound messages with retry, dedupe, and dead-lettering
     """
 
-    def __init__(self, config: Config, bus: MessageBus):
+    def __init__(
+        self,
+        config: Config,
+        bus: MessageBus,
+        delivery_queue: DeliveryQueue | None = None,
+    ):
         self.config = config
         self.bus = bus
         self.channels: dict[str, BaseChannel] = {}
@@ -39,126 +81,39 @@ class ChannelManager:
         self._seen_outbound_ids: dict[str, float] = {}
         self._seen_ttl_seconds = 3600
         self._dead_letter_path = Path.home() / ".pawbot" / "logs" / "dead_letter.jsonl"
+        self._delivery_idle_sleep_s = 0.05
+        self.delivery_queue = delivery_queue or DeliveryQueue()
 
         self._init_channels()
 
     def _init_channels(self) -> None:
-        """Initialize channels based on config."""
+        """
+        Initialize all enabled channels via the registry.
 
-        # Telegram channel
-        if self.config.channels.telegram.enabled:
+        Iterates _CHANNEL_REGISTRY — one entry per channel type.
+        Lazy-imports each class so a missing optional dependency (e.g. python-telegram-bot)
+        only prevents that channel from loading, not the entire manager.
+
+        CC = 3 (was 21).  To add a new channel: append to _CHANNEL_REGISTRY above.
+        """
+        for entry in _CHANNEL_REGISTRY:
+            channel_cfg = getattr(self.config.channels, entry.config_attr, None)
+            if channel_cfg is None or not getattr(channel_cfg, "enabled", False):
+                continue
+
             try:
-                from pawbot.channels.telegram import TelegramChannel
-                self.channels["telegram"] = TelegramChannel(
-                    self.config.channels.telegram,
-                    self.bus,
-                    groq_api_key=self.config.providers.groq.api_key,
-                )
-                logger.info("Telegram channel enabled")
-            except ImportError as e:
-                logger.warning("Telegram channel not available: {}", e)
+                module   = __import__(entry.import_path, fromlist=[entry.class_name])
+                cls      = getattr(module, entry.class_name)
+                extra    = entry.extra_kwargs(self.config)
+                instance = cls(channel_cfg, self.bus, **extra)
+                self.channels[entry.config_attr] = instance
+                logger.info("{} channel enabled", entry.config_attr)
+            except ImportError as exc:
+                logger.warning("{} channel not available: {}", entry.config_attr, exc)
+            except Exception as exc:
+                logger.error("{} channel failed to initialise: {}", entry.config_attr, exc)
 
-        # WhatsApp channel
-        if self.config.channels.whatsapp.enabled:
-            try:
-                from pawbot.channels.whatsapp import WhatsAppChannel
-                self.channels["whatsapp"] = WhatsAppChannel(
-                    self.config.channels.whatsapp, self.bus
-                )
-                logger.info("WhatsApp channel enabled")
-            except ImportError as e:
-                logger.warning("WhatsApp channel not available: {}", e)
 
-        # Discord channel
-        if self.config.channels.discord.enabled:
-            try:
-                from pawbot.channels.discord import DiscordChannel
-                self.channels["discord"] = DiscordChannel(
-                    self.config.channels.discord, self.bus
-                )
-                logger.info("Discord channel enabled")
-            except ImportError as e:
-                logger.warning("Discord channel not available: {}", e)
-
-        # Feishu channel
-        if self.config.channels.feishu.enabled:
-            try:
-                from pawbot.channels.feishu import FeishuChannel
-                self.channels["feishu"] = FeishuChannel(
-                    self.config.channels.feishu, self.bus
-                )
-                logger.info("Feishu channel enabled")
-            except ImportError as e:
-                logger.warning("Feishu channel not available: {}", e)
-
-        # Mochat channel
-        if self.config.channels.mochat.enabled:
-            try:
-                from pawbot.channels.mochat import MochatChannel
-
-                self.channels["mochat"] = MochatChannel(
-                    self.config.channels.mochat, self.bus
-                )
-                logger.info("Mochat channel enabled")
-            except ImportError as e:
-                logger.warning("Mochat channel not available: {}", e)
-
-        # DingTalk channel
-        if self.config.channels.dingtalk.enabled:
-            try:
-                from pawbot.channels.dingtalk import DingTalkChannel
-                self.channels["dingtalk"] = DingTalkChannel(
-                    self.config.channels.dingtalk, self.bus
-                )
-                logger.info("DingTalk channel enabled")
-            except ImportError as e:
-                logger.warning("DingTalk channel not available: {}", e)
-
-        # Email channel
-        if self.config.channels.email.enabled:
-            try:
-                from pawbot.channels.email import EmailChannel
-                self.channels["email"] = EmailChannel(
-                    self.config.channels.email, self.bus
-                )
-                logger.info("Email channel enabled")
-            except ImportError as e:
-                logger.warning("Email channel not available: {}", e)
-
-        # Slack channel
-        if self.config.channels.slack.enabled:
-            try:
-                from pawbot.channels.slack import SlackChannel
-                self.channels["slack"] = SlackChannel(
-                    self.config.channels.slack, self.bus
-                )
-                logger.info("Slack channel enabled")
-            except ImportError as e:
-                logger.warning("Slack channel not available: {}", e)
-
-        # QQ channel
-        if self.config.channels.qq.enabled:
-            try:
-                from pawbot.channels.qq import QQChannel
-                self.channels["qq"] = QQChannel(
-                    self.config.channels.qq,
-                    self.bus,
-                )
-                logger.info("QQ channel enabled")
-            except ImportError as e:
-                logger.warning("QQ channel not available: {}", e)
-
-        # Matrix channel
-        if self.config.channels.matrix.enabled:
-            try:
-                from pawbot.channels.matrix import MatrixChannel
-                self.channels["matrix"] = MatrixChannel(
-                    self.config.channels.matrix,
-                    self.bus,
-                )
-                logger.info("Matrix channel enabled")
-            except ImportError as e:
-                logger.warning("Matrix channel not available: {}", e)
 
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""
@@ -206,6 +161,17 @@ class ChannelManager:
             return str(explicit)
         payload = f"{msg.channel}|{msg.chat_id}|{msg.reply_to or ''}|{msg.content}|{','.join(msg.media)}"
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _should_dispatch_progress(self, msg: OutboundMessage) -> bool:
+        """Apply progress visibility rules before queueing a message."""
+        metadata = msg.metadata or {}
+        if not metadata.get("_progress"):
+            return True
+        if metadata.get("_tool_hint") and not self.config.channels.send_tool_hints:
+            return False
+        if not metadata.get("_tool_hint") and not self.config.channels.send_progress:
+            return False
+        return True
 
     def _prune_seen(self) -> None:
         now = time.time()
@@ -262,40 +228,85 @@ class ChannelManager:
         logger.error("Message moved to dead-letter queue for channel {}", msg.channel)
         return False
 
+    def _enqueue_delivery_message(self, msg: OutboundMessage) -> str | None:
+        """Persist an outbound message into the delivery queue."""
+        if not self._should_dispatch_progress(msg):
+            return None
+
+        message_id = self._message_id(msg)
+        if self._is_duplicate(message_id):
+            logger.info("Skipping duplicate outbound message {}", message_id)
+            return None
+
+        metadata = dict(msg.metadata or {})
+        metadata.setdefault("idempotency_key", message_id)
+        queued = OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=msg.content,
+            reply_to=msg.reply_to,
+            media=list(msg.media),
+            metadata=metadata,
+        )
+        ttl_seconds = int(metadata.get("delivery_ttl_seconds", 3600) or 3600)
+        self.delivery_queue.enqueue_outbound(
+            queued,
+            message_id=message_id,
+            max_attempts=self._max_send_attempts,
+            ttl_seconds=ttl_seconds,
+        )
+        return message_id
+
+    async def _send_delivery_message(self, channel: BaseChannel, msg) -> bool:
+        """Attempt a single delivery queue send."""
+        try:
+            await channel.send(msg.to_outbound())
+            return True
+        except Exception as exc:
+            self.delivery_queue.mark_failed(msg.message_id, str(exc))
+            if self.delivery_queue.get(msg.message_id) is None:
+                self._write_dead_letter(msg.to_outbound(), str(exc))
+            logger.warning(
+                "Delivery {} failed for {}: {}",
+                msg.message_id[:8],
+                msg.channel,
+                exc,
+            )
+            return False
+
     async def _dispatch_outbound(self) -> None:
-        """Dispatch outbound messages to the appropriate channel."""
+        """Drain bus messages into the delivery queue and dispatch pending work."""
         logger.info("Outbound dispatcher started")
 
         while True:
             try:
-                msg = await asyncio.wait_for(
-                    self.bus.consume_outbound(),
-                    timeout=1.0
-                )
+                drained = 0
+                while True:
+                    try:
+                        outbound = self.bus.outbound.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    if self._enqueue_delivery_message(outbound):
+                        drained += 1
 
-                if msg.metadata.get("_progress"):
-                    if msg.metadata.get("_tool_hint") and not self.config.channels.send_tool_hints:
-                        continue
-                    if not msg.metadata.get("_tool_hint") and not self.config.channels.send_progress:
-                        continue
+                delivery = self.delivery_queue.dequeue()
+                if delivery is None:
+                    if drained == 0:
+                        await asyncio.sleep(self._delivery_idle_sleep_s)
+                    continue
 
-                channel = self.channels.get(msg.channel)
+                channel = self.channels.get(delivery.channel)
                 if not channel:
-                    logger.warning("Unknown channel: {}", msg.channel)
-                    self._write_dead_letter(msg, "unknown channel")
+                    logger.warning("Unknown channel: {}", delivery.channel)
+                    self.delivery_queue.mark_failed(delivery.message_id, "unknown channel")
+                    if self.delivery_queue.get(delivery.message_id) is None:
+                        self._write_dead_letter(delivery.to_outbound(), "unknown channel")
                     continue
 
-                message_id = self._message_id(msg)
-                if self._is_duplicate(message_id):
-                    logger.info("Skipping duplicate outbound message {}", message_id)
-                    continue
-
-                sent = await self._send_with_retry(channel, msg)
+                sent = await self._send_delivery_message(channel, delivery)
                 if sent:
-                    self._mark_seen(message_id)
-
-            except asyncio.TimeoutError:
-                continue
+                    self.delivery_queue.mark_delivered(delivery.message_id)
+                    self._mark_seen(delivery.message_id)
             except asyncio.CancelledError:
                 break
 
@@ -304,14 +315,29 @@ class ChannelManager:
         return self.channels.get(name)
 
     def get_status(self) -> dict[str, Any]:
-        """Get status of all channels."""
+        """Get status of all channels with tier info (Phase 4)."""
         return {
             name: {
                 "enabled": True,
-                "running": channel.is_running
+                "running": channel.is_running,
+                "tier": self._get_channel_tier(name),
+                "connected": getattr(channel, '_connected', channel.is_running),
+                "reconnect_count": getattr(channel, '_reconnect_count', 0),
             }
             for name, channel in self.channels.items()
         }
+
+    @staticmethod
+    def _get_channel_tier(name: str) -> str:
+        """Get tier classification for a channel (Phase 4)."""
+        tiers = {
+            "telegram": "production",
+            "whatsapp": "production",
+            "cli": "production",
+            "discord": "supported",
+            "slack": "supported",
+        }
+        return tiers.get(name, "community")
 
     @property
     def enabled_channels(self) -> list[str]:

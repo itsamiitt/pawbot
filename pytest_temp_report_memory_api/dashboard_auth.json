@@ -1,0 +1,5 @@
+{
+  "scheme": "pbkdf2_sha256",
+  "password_salt": "dd20931d11e4e63762af322fe33a64af",
+  "password_hash": "ddc798969f8e1815d648dde4ef85fef74177ff83ac0cc32afd131345af1304b1"
+}

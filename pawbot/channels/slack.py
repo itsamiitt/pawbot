@@ -2,7 +2,6 @@
 
 import asyncio
 import re
-from typing import Any
 
 from loguru import logger
 from slack_sdk.socket_mode.request import SocketModeRequest
@@ -109,83 +108,84 @@ class SlackChannel(BaseChannel):
         client: SocketModeClient,
         req: SocketModeRequest,
     ) -> None:
-        """Handle incoming Socket Mode requests."""
+        """Handle incoming Socket Mode requests. CC = 3 (was 26)."""
         if req.type != "events_api":
             return
 
-        # Acknowledge right away
+        await self._ack_socket_request(client, req.envelope_id)
+        inbound = self._build_inbound_event(req.payload or {})
+        if not inbound:
+            return
+
+        await self._dispatch_inbound_event(*inbound)
+
+    async def _ack_socket_request(
+        self,
+        client: SocketModeClient,
+        envelope_id: str,
+    ) -> None:
+        """Acknowledge Socket Mode envelope immediately (<3s)."""
         await client.send_socket_mode_response(
-            SocketModeResponse(envelope_id=req.envelope_id)
+            SocketModeResponse(envelope_id=envelope_id)
         )
 
-        payload = req.payload or {}
+    def _build_inbound_event(
+        self,
+        payload: dict,
+    ) -> tuple[str, str, str, str | None, str, dict, str | None] | None:
+        """Normalize and validate an events_api payload for downstream handling."""
         event = payload.get("event") or {}
-        event_type = event.get("type")
+        event_type = event.get("type", "")
+        if not self._should_process_slack_event(event, event_type):
+            return None
 
-        # Handle app mentions or plain messages
-        if event_type not in ("message", "app_mention"):
-            return
-
-        sender_id = event.get("user")
-        chat_id = event.get("channel")
-
-        # Ignore bot/system messages (any subtype = not a normal user message)
-        if event.get("subtype"):
-            return
-        if self._bot_user_id and sender_id == self._bot_user_id:
-            return
-
-        # Avoid double-processing: Slack sends both `message` and `app_mention`
-        # for mentions in channels. Prefer `app_mention`.
-        text = event.get("text") or ""
-        if event_type == "message" and self._bot_user_id and f"<@{self._bot_user_id}>" in text:
-            return
-
-        # Debug: log basic event shape
-        logger.debug(
-            "Slack event: type={} subtype={} user={} channel={} channel_type={} text={}",
-            event_type,
-            event.get("subtype"),
-            sender_id,
-            chat_id,
-            event.get("channel_type"),
-            text[:80],
-        )
+        sender_id, chat_id, text, thread_ts = self._extract_slack_message(event)
         if not sender_id or not chat_id:
-            return
+            return None
 
         channel_type = event.get("channel_type") or ""
-
         if not self._is_allowed(sender_id, chat_id, channel_type):
-            return
-
+            return None
         if channel_type != "im" and not self._should_respond_in_channel(event_type, text, chat_id):
-            return
+            return None
 
         text = self._strip_bot_mention(text)
-
-        thread_ts = event.get("thread_ts")
         if self.config.reply_in_thread and not thread_ts:
             thread_ts = event.get("ts")
-        # Add :eyes: reaction to the triggering message (best-effort)
+
+        session_key = f"slack:{chat_id}:{thread_ts}" if thread_ts and channel_type != "im" else None
+        return sender_id, chat_id, text, thread_ts, channel_type, event, session_key
+
+    async def _add_event_reaction(self, chat_id: str, event: dict) -> None:
+        """Best-effort reaction on triggering event."""
+        if not self._web_client or not event.get("ts"):
+            return
         try:
-            if self._web_client and event.get("ts"):
-                await self._web_client.reactions_add(
-                    channel=chat_id,
-                    name=self.config.react_emoji,
-                    timestamp=event.get("ts"),
-                )
+            await self._web_client.reactions_add(
+                channel=chat_id,
+                name=self.config.react_emoji,
+                timestamp=event.get("ts"),
+            )
         except Exception as e:
             logger.debug("Slack reactions_add failed: {}", e)
 
-        # Thread-scoped session key for channel/group messages
-        session_key = f"slack:{chat_id}:{thread_ts}" if thread_ts and channel_type != "im" else None
-
+    async def _dispatch_inbound_event(
+        self,
+        sender_id: str,
+        chat_id: str,
+        text: str,
+        thread_ts: str | None,
+        channel_type: str,
+        event: dict,
+        session_key: str | None,
+    ) -> None:
+        """Forward validated Slack event to the channel bus."""
+        await self._add_event_reaction(chat_id, event)
         try:
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=chat_id,
-                content=text,
+                content=text or "[empty message]",
                 metadata={
                     "slack": {
                         "event": event,
@@ -195,8 +195,61 @@ class SlackChannel(BaseChannel):
                 },
                 session_key=session_key,
             )
-        except Exception as e:  # noqa: F841
+        except Exception:
             logger.exception("Error handling Slack message from {}", sender_id)
+
+    def _should_process_slack_event(
+        self,
+        event: dict,
+        event_type: str,
+    ) -> bool:
+        """
+        Guard: return False if this Slack event should be silently skipped.
+
+        Skips:
+        - Events that are not 'message' or 'app_mention'
+        - Messages with any subtype (bot messages, edits, etc.)
+        - Messages from the bot itself (by user_id)
+        - 'message' events that are actually mentions (avoid double-processing)
+
+        Extracted from _on_socket_request to reduce CC from 26.
+        CC = 5.
+        """
+        if event_type not in ("message", "app_mention"):
+            return False
+
+        # Any subtype = not a normal user message (bot_message, message_changed, etc.)
+        if event.get("subtype"):
+            return False
+
+        sender_id = event.get("user", "")
+        if self._bot_user_id and sender_id == self._bot_user_id:
+            return False
+
+        # Slack sends both 'message' and 'app_mention' for channel mentions.
+        # Process only 'app_mention' to avoid double-processing.
+        text = event.get("text") or ""
+        if event_type == "message" and self._bot_user_id and f"<@{self._bot_user_id}>" in text:
+            return False
+
+        return True
+
+    def _extract_slack_message(self, event: dict) -> tuple[str, str, str, str | None]:
+        """
+        Extract routing fields from a Slack event dict.
+
+        Returns (sender_id, chat_id, text, thread_ts).
+        Returns empty strings if required fields are missing — caller must check.
+
+        Extracted from _on_socket_request to reduce CC from 26.
+        CC = 2.
+        """
+        sender_id = event.get("user", "")
+        chat_id   = event.get("channel", "")
+        text      = (event.get("text") or "").strip()
+        thread_ts = event.get("thread_ts")
+        return sender_id, chat_id, text, thread_ts
+
 
     def _is_allowed(self, sender_id: str, chat_id: str, channel_type: str) -> bool:
         if channel_type == "im":

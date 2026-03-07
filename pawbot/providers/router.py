@@ -68,6 +68,19 @@ class ModelRouter:
         self.config = config
         self.routing_enabled = config.get("routing", {}).get("enabled", True)
         self.ollama = OllamaProvider(config)
+
+        # Phase 3: Load routing table from config, fall back to hardcoded default
+        config_rules = config.get("routing", {}).get("rules", [])
+        if config_rules:
+            self._routing_table: list[tuple[str, float, float, str, str]] = [
+                (r["task_type"], r.get("complexity_min", 0.0),
+                 r.get("complexity_max", 1.0), r["provider"], r["model"])
+                for r in config_rules
+            ]
+            logger.info("Loaded %d custom routing rules from config", len(config_rules))
+        else:
+            self._routing_table = ROUTING_TABLE  # Use hardcoded default
+
         self._session_stats: dict[str, Any] = {
             "calls_per_provider": {},
             "estimated_cost": 0.0,
@@ -75,6 +88,10 @@ class ModelRouter:
             "latency_count": {},
         }
         self._last_provider_type: str = "openrouter"  # tracked for context.py
+
+        # Phase 3: Initialize cost tracker
+        from pawbot.providers.cost_tracker import CostTracker
+        self._cost_tracker = CostTracker()
 
     def route(self, task_type: str, complexity: float) -> tuple[str, str]:
         """Returns (provider_name, model_name) for the given task.
@@ -90,15 +107,17 @@ class ModelRouter:
             )
             return "openrouter", default
 
-        for rt_task, rt_min, rt_max, rt_provider, rt_model in ROUTING_TABLE:
+        for rt_task, rt_min, rt_max, rt_provider, rt_model in self._routing_table:
             if task_type == rt_task and rt_min <= complexity <= rt_max:
                 # Check if Ollama provider is available
                 if rt_provider == "ollama" and not self.ollama.is_available():
                     logger.warning(
-                        "Ollama unavailable for %s, routing to openrouter",
+                        "Ollama unavailable for %s, routing to fallback",
                         task_type,
                     )
-                    return "openrouter", "anthropic/claude-haiku-4-5"
+                    fallback_provider = self.config.get("routing", {}).get("fallback_provider", "openrouter")
+                    fallback_model = self.config.get("routing", {}).get("fallback_model", "anthropic/claude-haiku-4-5")
+                    return fallback_provider, fallback_model
                 return rt_provider, rt_model
 
         # No match found — default
@@ -211,15 +230,15 @@ class ModelRouter:
     # ── Provider call methods ────────────────────────────────────────────
 
     def _validate_key(self, provider: str, key: str) -> None:
-        """Raise ConfigError before making any network call if key is missing or placeholder."""
+        """Raise ValueError before making any network call if key is missing or placeholder."""
         from pawbot.utils.secrets import is_placeholder
         if not key or is_placeholder(key):
-            from pawbot.errors import ConfigError
-            raise ConfigError(
-                f"No valid API key for '{provider}'.\n"
-                f"Run: pawbot onboard --setup\n"
-                f"Or edit: ~/.pawbot/config.json → providers.{provider}.apiKey"
-            )
+            pretty_name = {
+                "openrouter": "OpenRouter",
+                "anthropic": "Anthropic",
+                "openai": "OpenAI",
+            }.get(provider, provider)
+            raise ValueError(f"{pretty_name} API key not set")
 
     def _call_openrouter(
         self,
@@ -361,6 +380,18 @@ class ModelRouter:
         stats["latency_count"][provider] = (
             stats["latency_count"].get(provider, 0) + 1
         )
+
+        # Phase 3: Record to persistent cost tracker
+        try:
+            self._cost_tracker.record(
+                provider=provider,
+                model=model,
+                input_tokens=0,   # TODO: extract from response in future
+                output_tokens=0,  # TODO: extract from response in future
+                latency_ms=elapsed * 1000,
+            )
+        except Exception:
+            pass  # Cost tracking is best-effort
 
     def log_session_summary(self) -> None:
         """Call at session end to log routing statistics."""

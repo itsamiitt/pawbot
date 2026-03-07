@@ -18,7 +18,6 @@ import os
 import platform
 import random
 import subprocess
-import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -38,10 +37,9 @@ except Exception:  # pragma: no cover - optional dependency
     _PYAUTOGUI_AVAILABLE = False
 
 try:
-    from PIL import Image
+    __import__("PIL")
     _PILLOW_AVAILABLE = True
 except Exception:  # pragma: no cover - optional dependency
-    Image = None  # type: ignore[assignment, misc]
     _PILLOW_AVAILABLE = False
 
 try:
@@ -341,9 +339,9 @@ def app_launch(
 
     try:
         if PLATFORM == "windows" and cmd.startswith("start "):
-            # On Windows, 'start' is a shell built-in
+            # nosec B602 - Windows "start" is a shell built-in without an argv equivalent.
             full_cmd = f"{cmd} {' '.join(args)}" if args else cmd
-            subprocess.Popen(full_cmd, shell=True)
+            subprocess.Popen(full_cmd, shell=True)  # nosec B602
         else:
             cmd_parts = cmd.split() + args
             subprocess.Popen(

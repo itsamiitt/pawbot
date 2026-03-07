@@ -135,6 +135,11 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
 
 def _migrate_config(data: dict) -> dict:
     """Migrate old config formats to current."""
+    agents = data.get("agents")
+    if isinstance(agents, list):
+        data["agents"] = {"list": agents}
+    elif not isinstance(agents, dict):
+        data["agents"] = {}
     # Move tools.exec.restrictToWorkspace → tools.restrictToWorkspace
     tools = data.get("tools", {})
     if not isinstance(tools, dict):

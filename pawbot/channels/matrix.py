@@ -14,7 +14,6 @@ try:
     from nio import (
         AsyncClient,
         AsyncClientConfig,
-        ContentRepositoryConfigError,
         DownloadError,
         InviteEvent,
         JoinError,
@@ -35,6 +34,7 @@ except ImportError as e:
     raise ImportError(
         "Matrix dependencies not installed. Run: pip install pawbot-ai[matrix]"
     ) from e
+
 
 from pawbot.bus.events import OutboundMessage
 from pawbot.channels.base import BaseChannel

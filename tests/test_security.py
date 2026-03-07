@@ -10,6 +10,7 @@ Tests verify:
 
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import sys
@@ -433,3 +434,42 @@ class TestActionGateAuditCompleteness:
         events = audit.read_recent(1)
         assert events
         assert events[0].get("caller") == "router"
+
+
+def test_audit_log_rotates_and_compresses(tmp_path):
+    log_path = tmp_path / "audit.jsonl"
+    log_path.write_text("x" * 256, encoding="utf-8")
+
+    audit = SecurityAuditLog(log_path=str(log_path))
+    audit.MAX_SIZE_BYTES = 32
+    audit.log("gate_check", "tool_x", {}, "safe", "allow")
+
+    rotated = tmp_path / "audit.jsonl.1.gz"
+    assert rotated.exists()
+    assert log_path.exists()
+    with gzip.open(rotated, "rt", encoding="utf-8") as fh:
+        assert fh.read() == "x" * 256
+
+
+def test_risk_override_can_force_tool_block(tmp_path):
+    log_path = str(tmp_path / "audit.jsonl")
+    gate = ActionGate(
+        config={"security": {"risk_overrides": {"custom_tool": "blocked"}}},
+        audit_log=SecurityAuditLog(log_path=log_path),
+    )
+
+    allowed, reason = gate.check("custom_tool", {"arg": "value"})
+    assert allowed is False
+    assert "blocked" in reason.lower()
+
+
+def test_risk_override_marks_tool_dangerous(tmp_path):
+    log_path = str(tmp_path / "audit.jsonl")
+    gate = ActionGate(
+        config={"security": {"risk_overrides": {"custom_tool": "dangerous"}}},
+        audit_log=SecurityAuditLog(log_path=log_path),
+    )
+
+    allowed, reason = gate.check("custom_tool", {"arg": "value"})
+    assert allowed is False
+    assert "confirmation" in reason.lower()

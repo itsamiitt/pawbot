@@ -60,6 +60,7 @@ class TestPawbotConfig:
         assert cfg.enabled is True
         assert cfg.require_confirmation_for_dangerous is True
         assert cfg.block_root_execution is True
+        assert cfg.risk_overrides == {}
         assert cfg.min_memory_salience == 0.2
         assert cfg.max_memory_tokens == 300
         assert cfg.injection_detection is True

@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, AsyncIterator
 
 
 @dataclass
@@ -110,3 +110,31 @@ class LLMProvider(ABC):
     def get_default_model(self) -> str:
         """Get the default model for this provider."""
         pass
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        temperature: float = 0.1,
+        max_tokens: int = 4096,
+        reasoning_effort: str | None = None,
+    ) -> AsyncIterator[str]:
+        """Stream chat completion tokens.
+
+        Default implementation falls back to non-streaming chat.
+        Override in provider subclasses for true streaming.
+
+        Yields:
+            Text chunks as they become available.
+        """
+        response = await self.chat(
+            messages=messages,
+            tools=tools,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            reasoning_effort=reasoning_effort,
+        )
+        if response.content:
+            yield response.content

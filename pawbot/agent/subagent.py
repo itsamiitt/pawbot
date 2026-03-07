@@ -673,7 +673,6 @@ class SubagentManager:
         from pawbot.agent.tools.registry import ToolRegistry
         from pawbot.agent.tools.shell import ExecTool
         from pawbot.agent.tools.web import WebFetchTool, WebSearchTool
-        from pawbot.bus.events import InboundMessage
 
         loguru_logger.info("Subagent [{}] starting task: {}", task_id, label)
 

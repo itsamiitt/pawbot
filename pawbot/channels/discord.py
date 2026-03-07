@@ -45,6 +45,7 @@ class DiscordChannel(BaseChannel):
     """Discord channel using Gateway websocket."""
 
     name = "discord"
+    MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_BYTES  # expose for easy mocking in tests
 
     def __init__(self, config: DiscordConfig, bus: MessageBus):
         super().__init__(config, bus)
@@ -54,6 +55,7 @@ class DiscordChannel(BaseChannel):
         self._heartbeat_task: asyncio.Task | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
         self._http: httpx.AsyncClient | None = None
+
 
     async def start(self) -> None:
         """Start the Discord gateway connection."""
@@ -217,15 +219,59 @@ class DiscordChannel(BaseChannel):
 
         self._heartbeat_task = asyncio.create_task(heartbeat_loop())
 
+    async def _download_attachments(
+        self,
+        attachments: list[dict],
+        media_dir: "Path",
+    ) -> tuple[list[str], list[str]]:
+        """
+        Download all Discord message attachments to local storage.
+
+        Returns (content_descriptions, media_paths).
+        content_descriptions: list of strings describing each attachment.
+        media_paths:          list of local file paths for downloaded files.
+
+        Extracted from _handle_message_create to reduce CC from 21.
+        CC = 4.
+        """
+        content_parts: list[str] = []
+        media_paths:   list[str] = []
+
+        for attachment in attachments:
+            url      = attachment.get("url")
+            filename = attachment.get("filename") or "attachment"
+            size     = attachment.get("size") or 0
+
+            if not url or not self._http:
+                continue
+            if size and size > self.MAX_ATTACHMENT_BYTES:
+                content_parts.append(f"[attachment: {filename} - too large]")
+                continue
+
+            try:
+                media_dir.mkdir(parents=True, exist_ok=True)
+                safe_name = filename.replace("/", "_")
+                file_path = media_dir / f"{attachment.get('id', 'file')}_{safe_name}"
+                resp      = await self._http.get(url)
+                resp.raise_for_status()
+                file_path.write_bytes(resp.content)
+                media_paths.append(str(file_path))
+                content_parts.append(f"[attachment: {file_path}]")
+            except Exception as exc:
+                logger.warning("Failed to download Discord attachment {}: {}", filename, exc)
+                content_parts.append(f"[attachment: {filename} - download failed]")
+
+        return content_parts, media_paths
+
     async def _handle_message_create(self, payload: dict[str, Any]) -> None:
-        """Handle incoming Discord messages."""
+        """Handle incoming Discord messages. CC = 5 (was 21)."""
         author = payload.get("author") or {}
         if author.get("bot"):
             return
 
-        sender_id = str(author.get("id", ""))
+        sender_id  = str(author.get("id", ""))
         channel_id = str(payload.get("channel_id", ""))
-        content = payload.get("content") or ""
+        content    = payload.get("content") or ""
 
         if not sender_id or not channel_id:
             return
@@ -233,30 +279,13 @@ class DiscordChannel(BaseChannel):
         if not self.is_allowed(sender_id):
             return
 
-        content_parts = [content] if content else []
-        media_paths: list[str] = []
+        content_parts: list[str] = [content] if content else []
         media_dir = Path.home() / ".pawbot" / "media"
 
-        for attachment in payload.get("attachments") or []:
-            url = attachment.get("url")
-            filename = attachment.get("filename") or "attachment"
-            size = attachment.get("size") or 0
-            if not url or not self._http:
-                continue
-            if size and size > MAX_ATTACHMENT_BYTES:
-                content_parts.append(f"[attachment: {filename} - too large]")
-                continue
-            try:
-                media_dir.mkdir(parents=True, exist_ok=True)
-                file_path = media_dir / f"{attachment.get('id', 'file')}_{filename.replace('/', '_')}"
-                resp = await self._http.get(url)
-                resp.raise_for_status()
-                file_path.write_bytes(resp.content)
-                media_paths.append(str(file_path))
-                content_parts.append(f"[attachment: {file_path}]")
-            except Exception as e:
-                logger.warning("Failed to download Discord attachment: {}", e)
-                content_parts.append(f"[attachment: {filename} - download failed]")
+        attachment_descs, media_paths = await self._download_attachments(
+            payload.get("attachments") or [], media_dir
+        )
+        content_parts.extend(attachment_descs)
 
         reply_to = (payload.get("referenced_message") or {}).get("id")
 
@@ -269,8 +298,8 @@ class DiscordChannel(BaseChannel):
             media=media_paths,
             metadata={
                 "message_id": str(payload.get("id", "")),
-                "guild_id": payload.get("guild_id"),
-                "reply_to": reply_to,
+                "guild_id":   payload.get("guild_id"),
+                "reply_to":   reply_to,
             },
         )
 

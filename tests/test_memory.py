@@ -10,6 +10,9 @@ from pathlib import Path
 import pytest
 
 import pawbot.agent.memory as memory_mod
+import pawbot.agent.memory.redis_store as redis_store_mod
+import pawbot.agent.memory.chroma_store as chroma_store_mod
+import pawbot.agent.memory.router as router_mod
 from pawbot.agent.memory import (
     ChromaEpisodeStore,
     MemoryClassifier,
@@ -124,7 +127,7 @@ def _make_config(
 
 class TestMemoryProvider:
     def test_redis_working_memory_save_load(self, monkeypatch, tmp_path: Path):
-        monkeypatch.setattr(memory_mod, "redis", types.SimpleNamespace(Redis=_FakeRedisClient))
+        monkeypatch.setattr(redis_store_mod, "redis", types.SimpleNamespace(Redis=_FakeRedisClient))
         store = RedisWorkingMemory("s1", _make_config(tmp_path, redis_enabled=True))
 
         memory_id = store.save("working", {"text": "hello redis"})
@@ -139,7 +142,7 @@ class TestMemoryProvider:
             def __init__(self, *args, **kwargs):
                 raise RuntimeError("offline")
 
-        monkeypatch.setattr(memory_mod, "redis", types.SimpleNamespace(Redis=_BrokenRedis))
+        monkeypatch.setattr(redis_store_mod, "redis", types.SimpleNamespace(Redis=_BrokenRedis))
         store = RedisWorkingMemory("s1", _make_config(tmp_path, redis_enabled=True))
 
         assert store._use_fallback is True
@@ -149,9 +152,9 @@ class TestMemoryProvider:
 
     def test_redis_ttl_expiry(self, monkeypatch, tmp_path: Path):
         now = [1000.0]
-        monkeypatch.setattr(memory_mod.time, "time", lambda: now[0])
+        monkeypatch.setattr(redis_store_mod.time, "time", lambda: now[0])
         _FakeRedisClient.now_fn = staticmethod(lambda: now[0])
-        monkeypatch.setattr(memory_mod, "redis", types.SimpleNamespace(Redis=_FakeRedisClient))
+        monkeypatch.setattr(redis_store_mod, "redis", types.SimpleNamespace(Redis=_FakeRedisClient))
         store = RedisWorkingMemory("s1", _make_config(tmp_path, redis_enabled=True, redis_ttl=1))
 
         store.save("working", {"text": "short lived"})
@@ -160,7 +163,7 @@ class TestMemoryProvider:
         assert store.load("short", limit=10) == []
 
     def test_redis_message_list_ltrim(self, monkeypatch, tmp_path: Path):
-        monkeypatch.setattr(memory_mod, "redis", types.SimpleNamespace(Redis=_FakeRedisClient))
+        monkeypatch.setattr(redis_store_mod, "redis", types.SimpleNamespace(Redis=_FakeRedisClient))
         store = RedisWorkingMemory("s1", _make_config(tmp_path, redis_enabled=True))
 
         for i in range(store.MAX_MESSAGES + 7):
@@ -279,7 +282,7 @@ class _FakeChromaClient:
 
 class TestChromaEpisodeStore:
     def test_save_and_semantic_search(self, monkeypatch, tmp_path: Path):
-        monkeypatch.setattr(memory_mod, "chromadb", None)
+        monkeypatch.setattr(chroma_store_mod, "chromadb", None)
         store = ChromaEpisodeStore(_make_config(tmp_path, chroma_enabled=True))
 
         memory_id = store.save("episode", {"text": "deploy failed on nginx restart"})
@@ -296,13 +299,13 @@ class TestChromaEpisodeStore:
                 def __init__(self, *args, **kwargs):
                     pass
 
-        monkeypatch.setattr(memory_mod, "embedding_functions", _Embeddings)
-        monkeypatch.setattr(memory_mod, "chromadb", types.SimpleNamespace(PersistentClient=_FakeChromaClient))
+        monkeypatch.setattr(chroma_store_mod, "embedding_functions", _Embeddings)
+        monkeypatch.setattr(chroma_store_mod, "chromadb", types.SimpleNamespace(PersistentClient=_FakeChromaClient))
         store = ChromaEpisodeStore(_make_config(tmp_path, chroma_enabled=True))
         assert store._embedding_backend == "sentence-transformers"
 
     def test_collection_persists_across_restart(self, monkeypatch, tmp_path: Path):
-        monkeypatch.setattr(memory_mod, "chromadb", None)
+        monkeypatch.setattr(chroma_store_mod, "chromadb", None)
         cfg = _make_config(tmp_path, chroma_enabled=True)
         store_1 = ChromaEpisodeStore(cfg)
         memory_id = store_1.save("episode", {"text": "persist this episode"})
@@ -314,7 +317,7 @@ class TestChromaEpisodeStore:
 
 class TestMemoryRouter:
     def test_routing_episode_to_chroma_and_sqlite(self, monkeypatch, tmp_path: Path):
-        monkeypatch.setattr(memory_mod, "chromadb", None)
+        monkeypatch.setattr(chroma_store_mod, "chromadb", None)
         router = MemoryRouter("s1", _make_config(tmp_path, chroma_enabled=True))
         memory_id = router.save("episode", {"text": "episode route check"})
 
@@ -328,7 +331,7 @@ class TestMemoryRouter:
         assert router.sqlite.load_by_id(memory_id) is not None
 
     def test_routing_working_to_redis(self, monkeypatch, tmp_path: Path):
-        monkeypatch.setattr(memory_mod, "redis", types.SimpleNamespace(Redis=_FakeRedisClient))
+        monkeypatch.setattr(redis_store_mod, "redis", types.SimpleNamespace(Redis=_FakeRedisClient))
         router = MemoryRouter("s1", _make_config(tmp_path, redis_enabled=True))
         memory_id = router.save("working", {"text": "redis route"})
         rows = router.redis.load("redis", limit=5)
@@ -370,7 +373,7 @@ class TestMemoryRouter:
             def __init__(self, *args, **kwargs):
                 raise RuntimeError("chroma unavailable")
 
-        monkeypatch.setattr(memory_mod, "ChromaEpisodeStore", _BrokenChroma)
+        monkeypatch.setattr(router_mod, "ChromaEpisodeStore", _BrokenChroma)
         router = MemoryRouter("s1", _make_config(tmp_path, chroma_enabled=True))
         assert router.chroma is None
         memory_id = router.save("fact", {"text": "still works"})

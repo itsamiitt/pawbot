@@ -10,7 +10,6 @@ Phase 10 enhancements:
 import asyncio
 import json
 import os
-import time
 from collections import OrderedDict
 from typing import Any
 
@@ -18,7 +17,7 @@ from loguru import logger
 
 from pawbot.bus.events import OutboundMessage
 from pawbot.bus.queue import MessageBus
-from pawbot.channels.base import BaseChannel, ChannelMessage
+from pawbot.channels.base import BaseChannel
 from pawbot.config.schema import WhatsAppConfig
 
 
@@ -39,6 +38,12 @@ class WhatsAppChannel(BaseChannel):
         self._connected = False
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()
 
+        # Phase 4: Reconnection state
+        self._reconnect_delay = 1
+        self._max_reconnect_delay = getattr(config, 'max_reconnect_delay', 300)
+        self._reconnect_count = 0
+        self._auto_reconnect = getattr(config, 'auto_reconnect', True)
+
         # Phase 10 — media download dir
         self._media_dir = os.path.expanduser(
             getattr(config, "media_dir", "~/.pawbot/downloads")
@@ -46,7 +51,7 @@ class WhatsAppChannel(BaseChannel):
         os.makedirs(self._media_dir, exist_ok=True)
 
     async def start(self) -> None:
-        """Start the WhatsApp channel by connecting to the bridge."""
+        """Start the WhatsApp channel with bridge health monitoring (Phase 4)."""
         import websockets
 
         bridge_url = self.config.bridge_url
@@ -57,7 +62,21 @@ class WhatsAppChannel(BaseChannel):
 
         while self._running:
             try:
-                async with websockets.connect(bridge_url) as ws:
+                # Phase 4: Check bridge health before connecting
+                if not await self._check_bridge_health():
+                    logger.warning("WhatsApp bridge not responding, waiting {}s...", self._reconnect_delay)
+                    await asyncio.sleep(self._reconnect_delay)
+                    self._reconnect_delay = min(self._reconnect_delay * 2, self._max_reconnect_delay)
+                    continue
+
+                self._reconnect_delay = 1  # Reset on successful connection
+                self._reconnect_count = 0
+
+                async with websockets.connect(
+                    bridge_url,
+                    ping_interval=30,
+                    ping_timeout=10,
+                ) as ws:
                     self._ws = ws
                     # Send auth token if configured
                     if self.config.bridge_token:
@@ -77,11 +96,34 @@ class WhatsAppChannel(BaseChannel):
             except Exception as e:
                 self._connected = False
                 self._ws = None
-                logger.warning("WhatsApp bridge connection error: {}", e)
 
-                if self._running:
-                    logger.info("Reconnecting in 5 seconds...")
-                    await asyncio.sleep(5)
+                if not self._running or not self._auto_reconnect:
+                    break
+
+                self._reconnect_count += 1
+                logger.warning(
+                    "WhatsApp bridge connection error (attempt {}): {} — reconnecting in {}s",
+                    self._reconnect_count, e, self._reconnect_delay,
+                )
+                await asyncio.sleep(self._reconnect_delay)
+                self._reconnect_delay = min(
+                    self._reconnect_delay * 2,
+                    self._max_reconnect_delay,
+                )
+
+    async def _check_bridge_health(self) -> bool:
+        """Check if the WhatsApp bridge is running and responsive (Phase 4)."""
+        try:
+            import httpx
+            # Convert ws:// to http:// for health check
+            health_url = self.config.bridge_url.replace("ws://", "http://").replace("wss://", "https://")
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.get(f"{health_url}/health")
+                return r.status_code == 200
+        except ImportError:
+            return True  # If httpx not available, assume healthy
+        except Exception:
+            return False
 
     async def stop(self) -> None:
         """Stop the WhatsApp channel."""

@@ -15,27 +15,18 @@ import logging
 import os
 import random
 import re
-import time
 from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
 try:
-    from playwright.async_api import (
-        async_playwright,
-        Browser,
-        BrowserContext,
-        Page,
-    )
+    from playwright.async_api import async_playwright
 
     _PLAYWRIGHT_AVAILABLE = True
 except Exception:  # pragma: no cover - optional dependency
     _PLAYWRIGHT_AVAILABLE = False
     async_playwright = None  # type: ignore[assignment, misc]
-    Browser = None  # type: ignore[assignment, misc]
-    BrowserContext = None  # type: ignore[assignment, misc]
-    Page = None  # type: ignore[assignment, misc]
 
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -158,7 +149,7 @@ async def _get_browser():
     return _browser
 
 
-async def _get_context(session: str = "default") -> Any:
+async def _get_context(session: str = "default", restore_session: bool = True) -> Any:
     """Get or create browser context for named session."""
     global _contexts
     if session not in _contexts:
@@ -174,12 +165,13 @@ async def _get_context(session: str = "default") -> Any:
         await context.add_init_script(STEALTH_INIT_SCRIPT)
 
         # Restore saved cookies if available
-        cookie_file = os.path.join(SESSIONS_DIR, f"{session}.json")
-        if os.path.exists(cookie_file):
-            with open(cookie_file, encoding="utf-8") as f:
-                cookies = json.load(f)
-            await context.add_cookies(cookies)
-            logger.info("Browser: restored session cookies for '%s'", session)
+        if restore_session:
+            cookie_file = os.path.join(SESSIONS_DIR, f"{session}.json")
+            if os.path.exists(cookie_file):
+                with open(cookie_file, encoding="utf-8") as f:
+                    cookies = json.load(f)
+                await context.add_cookies(cookies)
+                logger.info("Browser: restored session cookies for '%s'", session)
 
         _contexts[session] = context
         logger.info(
@@ -264,7 +256,12 @@ def browser_open(
         return missing
 
     async def _run():
-        page = await _get_page(session)
+        if session in _pages and _pages[session].is_closed():
+            _pages.pop(session, None)
+        if session not in _pages:
+            context = await _get_context(session, restore_session=restore_session)
+            _pages[session] = await context.new_page()
+        page = _pages[session]
         try:
             response = await page.goto(url, wait_until=wait_for, timeout=30000)
             title = await page.title()
@@ -784,8 +781,8 @@ def browser_pdf(
         page = await _get_page(session)
         await page.pdf(path=resolved_path, print_background=True)
         size = os.path.getsize(resolved_path)
-        logger.info("Browser: saved PDF to %s (%d bytes)", resolved_path, size)
-        return {"path": resolved_path, "size_bytes": size}
+        logger.info("Browser: saved PDF to %s (%d bytes), full_page=%s", resolved_path, size, full_page)
+        return {"path": resolved_path, "size_bytes": size, "full_page": full_page}
 
     return _run_async(_run())
 

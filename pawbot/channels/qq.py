@@ -2,7 +2,7 @@
 
 import asyncio
 from collections import deque
-from typing import TYPE_CHECKING
+from typing import Any
 
 from loguru import logger
 
@@ -13,16 +13,12 @@ from pawbot.config.schema import QQConfig
 
 try:
     import botpy
-    from botpy.message import C2CMessage
 
     QQ_AVAILABLE = True
 except ImportError:
     QQ_AVAILABLE = False
     botpy = None
-    C2CMessage = None
 
-if TYPE_CHECKING:
-    from botpy.message import C2CMessage
 
 
 def _make_bot_class(channel: "QQChannel") -> "type[botpy.Client]":
@@ -37,7 +33,7 @@ def _make_bot_class(channel: "QQChannel") -> "type[botpy.Client]":
         async def on_ready(self):
             logger.info("QQ bot ready: {}", self.robot.name)
 
-        async def on_c2c_message_create(self, message: "C2CMessage"):
+        async def on_c2c_message_create(self, message: Any):
             await channel._on_message(message)
 
         async def on_direct_message_create(self, message):
@@ -111,7 +107,7 @@ class QQChannel(BaseChannel):
         except Exception as e:
             logger.error("Error sending QQ message: {}", e)
 
-    async def _on_message(self, data: "C2CMessage") -> None:
+    async def _on_message(self, data: Any) -> None:
         """Handle incoming message from QQ."""
         try:
             # Dedup by message ID

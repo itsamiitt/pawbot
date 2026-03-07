@@ -5,16 +5,25 @@ Serves the UI and exposes REST API endpoints for all dashboard sections.
 Start with: pawbot dashboard
 """
 
-import asyncio
 import json
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from pawbot.canvas.server import register_canvas_routes
+from pawbot.dashboard.auth import (
+    create_token,
+    password_configured,
+    verify_password,
+    verify_token,
+)
+from pawbot.utils.rate_limit import RateLimitExceeded, RequestRateLimiter
 
 app = FastAPI(title="Pawbot Dashboard", docs_url=None, redoc_url=None)
 
@@ -25,9 +34,44 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-PAWBOT_HOME = Path.home() / ".pawbot"
-CONFIG_PATH = PAWBOT_HOME / "config.json"
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(_: Request, exc: RateLimitExceeded) -> JSONResponse:
+    retry_after = max(1, int(exc.retry_after) if exc.retry_after else 1)
+    return JSONResponse(
+        status_code=429,
+        headers={"Retry-After": str(retry_after)},
+        content={"error": "Rate limit exceeded", "limit": exc.limit},
+    )
+
+from pawbot.utils.paths import PAWBOT_HOME, CONFIG_PATH
 UI_FILE = Path(__file__).parent / "ui.html"
+dashboard_limiter = RequestRateLimiter()
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    """Protect dashboard API routes with a signed session cookie."""
+
+    PUBLIC_PATHS = {"/", "/favicon.ico", "/api/auth/login", "/api/auth/status"}
+
+    async def dispatch(self, request: Request, call_next):
+        if request.method == "OPTIONS" or request.url.path in self.PUBLIC_PATHS:
+            return await call_next(request)
+
+        token = request.cookies.get("pawbot_session", "")
+        if not token or not verify_token(token):
+            if request.url.path.startswith("/api/"):
+                return JSONResponse(
+                    status_code=401,
+                    content={"error": "Auth required"},
+                )
+            return JSONResponse(status_code=401, content={"error": "Auth required"})
+
+        return await call_next(request)
+
+
+app.add_middleware(AuthMiddleware)
+register_canvas_routes(app)
 
 
 # ── Static file serving ────────────────────────────────────────────────────────
@@ -38,6 +82,47 @@ async def root():
     if UI_FILE.exists():
         return UI_FILE.read_text(encoding="utf-8")
     return "<h1>ui.html not found</h1>"
+
+
+@app.get("/api/auth/status")
+async def auth_status(request: Request) -> dict:
+    token = request.cookies.get("pawbot_session", "")
+    return {
+        "authenticated": bool(token and verify_token(token)),
+        "configured": password_configured(),
+    }
+
+
+@app.post("/api/auth/login")
+async def login(request: Request, body: dict) -> JSONResponse:
+    dashboard_limiter.check_request(request, "dashboard:login", "10/minute")
+
+    if not password_configured():
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Dashboard auth is not configured"},
+        )
+
+    if not verify_password(str(body.get("password", ""))):
+        return JSONResponse(status_code=401, content={"error": "Invalid password"})
+
+    response = JSONResponse(content={"success": True, "configured": True})
+    response.set_cookie(
+        "pawbot_session",
+        create_token(),
+        httponly=True,
+        samesite="strict",
+        secure=request.url.scheme == "https",
+        max_age=24 * 3600,
+    )
+    return response
+
+
+@app.post("/api/auth/logout")
+async def logout() -> JSONResponse:
+    response = JSONResponse(content={"success": True})
+    response.delete_cookie("pawbot_session", samesite="strict")
+    return response
 
 
 
@@ -111,14 +196,25 @@ def _count_cron_jobs() -> int:
 
 
 def _count_memories() -> int:
-    """Count memory items."""
+    """Count memory items from SQLite (primary) with MEMORY.md fallback."""
+    try:
+        from pawbot.agent.memory.sqlite_store import SQLiteFactStore
+        from pawbot.agent.memory._compat import to_config_dict
+        from pawbot.config.loader import load_config
+
+        config = load_config()
+        store = SQLiteFactStore(to_config_dict(config))
+        rows = store.load(query="", limit=10000)
+        return len(rows)
+    except Exception:
+        pass
     try:
         mem_file = PAWBOT_HOME / "workspace" / "memory" / "MEMORY.md"
         if mem_file.exists():
             content = mem_file.read_text(encoding="utf-8")
-            return len([l for l in content.splitlines() if l.strip().startswith("- ")])
+            return len([line for line in content.splitlines() if line.strip().startswith("- ")])
         return 0
-    except Exception as e:  # noqa: F841
+    except Exception:
         return 0
 
 
@@ -129,6 +225,53 @@ def _deep_merge(base: dict, override: dict) -> None:
             _deep_merge(base[key], value)
         else:
             base[key] = value
+
+
+def _configured_agents_status() -> list[dict]:
+    """Return config-derived agent status when no live pool is attached."""
+    from pawbot.agents.pool import effective_agent_settings
+    from pawbot.agents.workspace_manager import WorkspaceManager
+    from pawbot.config.loader import load_config
+
+    config = load_config()
+    agents = []
+    for definition in config.agents.agents:
+        runtime = effective_agent_settings(definition, config.agents.defaults)
+        agents.append({
+            "id": definition.id,
+            "running": False,
+            "default": definition.default,
+            "enabled": definition.enabled,
+            "model": runtime["model"],
+            "workspace": WorkspaceManager(definition.id, runtime["workspace"]).to_dict(),
+            "tools_allow": list(definition.tools.allow),
+            "tools_deny": list(definition.tools.deny),
+            "dispatch_count": 0,
+            "last_message_at": None,
+            "heartbeat_enabled": definition.heartbeat.enabled,
+        })
+    return agents
+
+
+def _configured_heartbeat_status() -> list[dict]:
+    """Return config-derived heartbeat state when no live pool is attached."""
+    from pawbot.config.loader import load_config
+
+    config = load_config()
+    return [
+        {
+            "agent_id": definition.id,
+            "running": False,
+            "interval": definition.heartbeat.every,
+            "interval_seconds": None,
+            "target": definition.heartbeat.target,
+            "beat_count": 0,
+            "errors": 0,
+            "last_beat": 0.0,
+            "seconds_since_beat": None,
+        }
+        for definition in config.agents.agents
+    ]
 
 
 # ── Overview ──────────────────────────────────────────────────────────────────
@@ -146,8 +289,9 @@ async def overview():
 
 
 @app.get("/api/health")
-async def health():
+async def health(request: Request):
     """Run all doctor checks."""
+    dashboard_limiter.check_request(request, "dashboard:health", "60/minute")
     checks = []
 
     # Python version
@@ -223,8 +367,9 @@ async def health():
 
 
 @app.post("/api/chat")
-async def chat(body: dict):
+async def chat(request: Request, body: dict):
     """Quick chat — sends message to pawbot agent, returns response."""
+    dashboard_limiter.check_request(request, "dashboard:chat", "10/minute")
     message = body.get("message", "")
     if not message:
         raise HTTPException(400, "message required")
@@ -236,7 +381,7 @@ async def chat(body: dict):
         output = result.stdout.strip()
         # Strip Rich formatting artifacts if present
         lines = output.splitlines()
-        clean = [l for l in lines if not l.startswith("🐾")]
+        clean = [line for line in lines if not line.startswith("🐾")]
         return {"response": "\n".join(clean) if clean else output, "error": result.returncode != 0}
     except subprocess.TimeoutExpired:
         return {"response": "", "error": True, "detail": "Agent timed out (120s)"}
@@ -282,30 +427,136 @@ async def save_soul(body: dict):
     return {"ok": True}
 
 
+@app.get("/api/agents/status")
+async def agents_status():
+    """Get status of all configured agent instances."""
+    pool = getattr(app.state, "agent_pool", None)
+    return {"agents": pool.status() if pool else _configured_agents_status()}
+
+
+@app.get("/api/agents/{agent_id}/workspace")
+async def agent_workspace(agent_id: str):
+    """Get workspace info for a specific agent."""
+    pool = getattr(app.state, "agent_pool", None)
+    if pool:
+        instance = pool.get_agent(agent_id)
+        if instance:
+            return {"workspace": instance.workspace_mgr.to_dict()}
+
+    from pawbot.agents.pool import effective_agent_settings, resolve_agent_definition
+    from pawbot.agents.workspace_manager import WorkspaceManager
+    from pawbot.config.loader import load_config
+
+    config = load_config()
+    definition = resolve_agent_definition(config.agents, agent_id, include_disabled=True)
+    if definition.id != agent_id:
+        return {"error": f"Agent '{agent_id}' not found"}
+
+    runtime = effective_agent_settings(definition, config.agents.defaults)
+    return {"workspace": WorkspaceManager(agent_id, runtime["workspace"]).to_dict()}
+
+
+@app.post("/api/agents/{agent_id}/restart")
+async def restart_agent(agent_id: str):
+    """Restart a specific live agent."""
+    pool = getattr(app.state, "agent_pool", None)
+    if not pool:
+        return {"error": "Agent pool not initialized"}
+    ok = await pool.restart_agent(agent_id)
+    if ok:
+        return {"success": True, "message": f"Agent '{agent_id}' restarted"}
+    return {"error": f"Agent '{agent_id}' not found"}
+
+
+@app.get("/api/agents/heartbeats")
+async def agents_heartbeats():
+    """Get heartbeat status for all agents."""
+    pool = getattr(app.state, "agent_pool", None)
+    return {"heartbeats": pool.heartbeat_status() if pool else _configured_heartbeat_status()}
+
+
 # ── Memory ────────────────────────────────────────────────────────────────────
+
+
+@app.get("/api/delivery/stats")
+async def delivery_stats():
+    """Delivery queue statistics."""
+    from pawbot.delivery.queue import DeliveryQueue
+
+    return DeliveryQueue().get_stats()
+
+
+@app.get("/api/delivery/failed")
+async def delivery_failed():
+    """List recent failed deliveries."""
+    from pawbot.delivery.queue import DeliveryQueue
+
+    return {"failed": DeliveryQueue().list_failed(limit=50)}
+
+
+@app.post("/api/delivery/retry/{message_id}")
+async def retry_delivery(message_id: str):
+    """Retry a failed delivery."""
+    from pawbot.delivery.queue import DeliveryQueue
+
+    queue = DeliveryQueue()
+    if not queue.retry_failed(message_id):
+        return JSONResponse(status_code=404, content={"error": "Message not found"})
+    return {"success": True, "message_id": message_id}
 
 
 @app.get("/api/memory")
 async def list_memory(page: int = 1, limit: int = 50, search: str = None):
-    """List memory items from MEMORY.md and SQLite if available."""
+    """List memory items from SQLite store (primary) with MEMORY.md fallback."""
     items = []
-    mem_file = PAWBOT_HOME / "workspace" / "memory" / "MEMORY.md"
-    if mem_file.exists():
-        content = mem_file.read_text(encoding="utf-8")
-        for i, line in enumerate(content.splitlines()):
-            line = line.strip()
-            if line.startswith("- "):
-                text = line[2:].strip()
-                if search and search.lower() not in text.lower():
-                    continue
-                items.append({
-                    "id": str(i),
-                    "content": text,
-                    "type": "fact",
-                    "salience": 0.8,
-                    "created": "",
-                    "archived": False,
-                })
+
+    # Try the real SQLite memory system first — this is the system of record.
+    try:
+        from pawbot.agent.memory.sqlite_store import SQLiteFactStore
+        from pawbot.agent.memory._compat import to_config_dict
+        from pawbot.config.loader import load_config
+
+        config = load_config()
+        store = SQLiteFactStore(to_config_dict(config))
+        if search:
+            rows = store.search(query=search, limit=500)
+        else:
+            rows = store.load(query="", limit=500)
+        for row in rows:
+            content = row.get("content", {})
+            if isinstance(content, dict):
+                text = content.get("text", json.dumps(content, ensure_ascii=False))
+            else:
+                text = str(content)
+            items.append({
+                "id": row.get("id", ""),
+                "content": text,
+                "type": row.get("type", "fact"),
+                "salience": row.get("salience", 1.0),
+                "created": row.get("created_at", ""),
+                "archived": False,
+                "source": "sqlite",
+            })
+    except Exception:
+        # Fallback: read from MEMORY.md if SQLite is unavailable
+        mem_file = PAWBOT_HOME / "workspace" / "memory" / "MEMORY.md"
+        if mem_file.exists():
+            content = mem_file.read_text(encoding="utf-8")
+            for i, line in enumerate(content.splitlines()):
+                line = line.strip()
+                if line.startswith("- "):
+                    text = line[2:].strip()
+                    if search and search.lower() not in text.lower():
+                        continue
+                    items.append({
+                        "id": str(i),
+                        "content": text,
+                        "type": "fact",
+                        "salience": 0.8,
+                        "created": "",
+                        "archived": False,
+                        "source": "markdown",
+                    })
 
     total = len(items)
     start = (page - 1) * limit
@@ -489,10 +740,60 @@ async def put_raw_config(body: dict):
 
 
 @app.post("/api/config/test-key")
-async def test_api_key(body: dict):
-    """Test an API key by making a minimal call."""
-    # Placeholder — real implementation would call the provider
-    return {"valid": True, "latency_ms": 0}
+async def test_api_key(request: Request, body: dict):
+    """Test an API key by making a minimal call to the provider."""
+    dashboard_limiter.check_request(request, "dashboard:test-key", "10/minute")
+
+    provider = str(body.get("provider", "")).strip().lower()
+    api_key = str(body.get("apiKey", body.get("api_key", ""))).strip()
+
+    if not provider:
+        return {"valid": False, "latency_ms": 0, "error": "No provider specified"}
+    if not api_key:
+        return {"valid": False, "latency_ms": 0, "error": "No API key provided"}
+
+    try:
+        import httpx
+    except ImportError:
+        return {"valid": False, "latency_ms": 0, "error": "httpx not installed"}
+
+    start_ts = time.time()
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            if provider in ("openai",):
+                r = await client.get(
+                    "https://api.openai.com/v1/models",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+                r.raise_for_status()
+            elif provider in ("openrouter",):
+                r = await client.get(
+                    "https://openrouter.ai/api/v1/auth/key",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+                r.raise_for_status()
+            elif provider in ("anthropic",):
+                if not api_key.startswith("sk-ant-"):
+                    latency = round((time.time() - start_ts) * 1000, 1)
+                    return {"valid": False, "latency_ms": latency, "error": "Invalid Anthropic key format (expected sk-ant-...)"}
+                # Anthropic has no lightweight health endpoint; format check is best-effort
+                latency = round((time.time() - start_ts) * 1000, 1)
+                return {"valid": True, "latency_ms": latency}
+            elif provider in ("ollama",):
+                base = body.get("baseUrl", "http://localhost:11434")
+                r = await client.get(f"{base}/api/tags")
+                r.raise_for_status()
+            else:
+                return {"valid": False, "latency_ms": 0, "error": f"Unknown provider '{provider}'; cannot validate"}
+
+        latency = round((time.time() - start_ts) * 1000, 1)
+        return {"valid": True, "latency_ms": latency}
+    except httpx.HTTPStatusError as e:
+        latency = round((time.time() - start_ts) * 1000, 1)
+        return {"valid": False, "latency_ms": latency, "error": f"HTTP {e.response.status_code}"}
+    except Exception as e:
+        latency = round((time.time() - start_ts) * 1000, 1)
+        return {"valid": False, "latency_ms": latency, "error": str(e)}
 
 
 @app.post("/api/config/reset")
@@ -522,9 +823,9 @@ async def get_log(filename: str, tail: int = 200, search: str = None, level: str
     except Exception as e:  # noqa: F841
         return {"lines": [], "total": 0}
     if search:
-        lines = [l for l in lines if search.lower() in l.lower()]
+        lines = [line for line in lines if search.lower() in line.lower()]
     if level and level != "ALL":
-        lines = [l for l in lines if f"[{level}]" in l]
+        lines = [line for line in lines if f"[{level}]" in line]
     return {"lines": lines[-tail:], "total": len(lines)}
 
 
@@ -536,6 +837,82 @@ async def download_log(filename: str):
     if not log_path.exists():
         raise HTTPException(404, "Log file not found")
     return FileResponse(str(log_path), filename=filename)
+
+
+
+
+# ── Fleet ─────────────────────────────────────────────────────────────────────────
+
+
+@app.get("/api/fleet/status")
+async def fleet_status():
+    status_path = PAWBOT_HOME / "shared" / "status.json"
+    if not status_path.exists():
+        return {"active": False, "fleet": {}, "config": {}, "execution_log": []}
+    try:
+        data = json.loads(status_path.read_text(encoding="utf-8"))
+        data["active"] = True
+        return data
+    except (json.JSONDecodeError, OSError):
+        return {"active": False, "fleet": {}, "config": {}, "execution_log": []}
+
+
+@app.get("/api/fleet/dag")
+async def fleet_dag():
+    status_path = PAWBOT_HOME / "shared" / "status.json"
+    if not status_path.exists():
+        return {"mermaid": "", "tasks": []}
+    try:
+        data = json.loads(status_path.read_text(encoding="utf-8"))
+        fleet = data.get("fleet", {})
+        return {
+            "mermaid": fleet.get("dag_mermaid", ""),
+            "tasks": fleet.get("tasks", []),
+        }
+    except (json.JSONDecodeError, OSError):
+        return {"mermaid": "", "tasks": []}
+
+
+# ── Phase 7: Metrics Endpoints ───────────────────────────────────────────────
+
+
+@app.get("/api/metrics")
+async def dashboard_json_metrics():
+    """JSON metrics for dashboard (Phase 7)."""
+    from pawbot.observability.metrics import metrics
+    return metrics.to_dict()
+
+
+@app.get("/api/metrics/prometheus")
+async def dashboard_prometheus_metrics():
+    """Prometheus text format metrics (Phase 7)."""
+    from starlette.responses import Response
+    from pawbot.observability.metrics import metrics
+    return Response(content=metrics.to_prometheus(), media_type="text/plain")
+
+
+# ── Observability ─────────────────────────────────────────────────────────────
+
+
+@app.get("/api/observability")
+async def observability_summary(limit: int = 500):
+    """Return trace-based SLO and reliability summary."""
+    cfg = _load_raw_config()
+    obs = cfg.get("observability", {}) if isinstance(cfg, dict) else {}
+    trace_file = obs.get("traceFile") or obs.get("trace_file") or "~/.pawbot/logs/traces.jsonl"
+
+    from pawbot.agent.telemetry import summarize_trace_file
+
+    summary = summarize_trace_file(trace_file, limit=limit)
+    return {
+        "trace_file": str(Path(trace_file).expanduser()),
+        "window_span_count": summary.get("window_span_count", 0),
+        "error_count": summary.get("error_count", 0),
+        "success_rate_pct": summary.get("success_rate_pct", 100.0),
+        "latency_p50_ms": summary.get("latency_p50_ms", 0.0),
+        "latency_p95_ms": summary.get("latency_p95_ms", 0.0),
+        "channel_delivery_success_pct": summary.get("channel_delivery_success_pct", {}),
+    }
 
 
 # ── SPA fallback (MUST be last route — catch-all for frontend routing) ────────
@@ -570,23 +947,3 @@ def start(host: str = "127.0.0.1", port: int = 4000, open_browser: bool = True):
 
 if __name__ == "__main__":
     start()
-
-@app.get("/api/observability")
-async def observability_summary(limit: int = 500):
-    """Return trace-based SLO and reliability summary."""
-    cfg = _load_raw_config()
-    obs = cfg.get("observability", {}) if isinstance(cfg, dict) else {}
-    trace_file = obs.get("traceFile") or obs.get("trace_file") or "~/.pawbot/logs/traces.jsonl"
-
-    from pawbot.agent.telemetry import summarize_trace_file
-
-    summary = summarize_trace_file(trace_file, limit=limit)
-    return {
-        "trace_file": str(Path(trace_file).expanduser()),
-        "window_span_count": summary.get("window_span_count", 0),
-        "error_count": summary.get("error_count", 0),
-        "success_rate_pct": summary.get("success_rate_pct", 100.0),
-        "latency_p50_ms": summary.get("latency_p50_ms", 0.0),
-        "latency_p95_ms": summary.get("latency_p95_ms", 0.0),
-        "channel_delivery_success_pct": summary.get("channel_delivery_success_pct", {}),
-    }

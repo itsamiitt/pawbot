@@ -1,7 +1,6 @@
 """Centralised logging setup. Call setup_logging() once per CLI entry point."""
 import logging
 import sys
-from pathlib import Path
 
 
 def setup_logging(level: str = "WARNING") -> None:

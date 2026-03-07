@@ -224,13 +224,24 @@ class BaseChannel(ABC):
             )
             return
 
+        # Phase 4: resolve agent config via multi-agent router
+        enriched_meta = dict(metadata or {})
+        try:
+            from pawbot.agent.agent_router import agent_router
+            from pawbot.contracts import ChannelType
+            channel_type = ChannelType(self.name) if self.name in [e.value for e in ChannelType] else ChannelType.API
+            agent_config = agent_router.resolve(channel_type, str(sender_id))
+            enriched_meta["agent_id"] = agent_config.get("id", "default")
+        except Exception:
+            pass  # graceful degradation — routing still works without agent_router
+
         msg = InboundMessage(
             channel=self.name,
             sender_id=str(sender_id),
             chat_id=str(chat_id),
             content=content,
             media=media or [],
-            metadata=metadata or {},
+            metadata=enriched_meta,
             session_key_override=session_key,
         )
 
